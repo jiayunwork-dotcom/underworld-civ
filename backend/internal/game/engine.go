@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -94,7 +95,7 @@ func (gs *GameState) StartGame() {
 		}
 		cell.Building = building
 
-		buildingKey := string(rune(pos.Layer)) + "_" + HexCoordKey(pos.Coord)
+		buildingKey := fmt.Sprintf("%d_%s", pos.Layer, HexCoordKey(pos.Coord))
 		player.Buildings[buildingKey] = building
 
 		for i := 0; i < 3; i++ {
@@ -418,7 +419,7 @@ func (gs *GameState) processBuilding() {
 		building.MaxHP = building.HP
 
 		cell.Building = building
-		buildingKey := string(rune(layerIdx)) + "_" + HexCoordKey(coord)
+		buildingKey := fmt.Sprintf("%d_%s", layerIdx, HexCoordKey(coord))
 		player.Buildings[buildingKey] = building
 	}
 

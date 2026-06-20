@@ -13,11 +13,15 @@ type CreateGameRequest struct {
 	MaxPlayers int    `json:"max_players"`
 	Race       string `json:"race"`
 	Color      string `json:"color"`
+	PlayerID   string `json:"player_id"`
+	Username   string `json:"username"`
 }
 
 type JoinGameRequest struct {
-	Race  string `json:"race"`
-	Color string `json:"color"`
+	Race     string `json:"race"`
+	Color    string `json:"color"`
+	PlayerID string `json:"player_id"`
+	Username string `json:"username"`
 }
 
 func CreateGame(c *fiber.Ctx) error {
@@ -30,8 +34,8 @@ func CreateGame(c *fiber.Ctx) error {
 		req.MaxPlayers = 6
 	}
 
-	playerID := c.Get("X-Player-ID")
-	username := c.Get("X-Username")
+	playerID := req.PlayerID
+	username := req.Username
 
 	if playerID == "" {
 		playerID = uuid.New().String()
@@ -96,7 +100,7 @@ func GetGame(c *fiber.Ctx) error {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "game not found"})
 	}
 
-	playerID := c.Get("X-Player-ID")
+	playerID := c.Query("player_id")
 
 	return c.JSON(fiber.Map{
 		"game":      state,
@@ -112,8 +116,8 @@ func JoinGame(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
 	}
 
-	playerID := c.Get("X-Player-ID")
-	username := c.Get("X-Username")
+	playerID := req.PlayerID
+	username := req.Username
 
 	if playerID == "" {
 		playerID = uuid.New().String()
@@ -162,19 +166,20 @@ func StartGame(c *fiber.Ctx) error {
 
 func SubmitAction(c *fiber.Ctx) error {
 	gameID := c.Params("id")
-	playerID := c.Get("X-Player-ID")
-
-	if playerID == "" {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "player id required"})
-	}
 
 	var action struct {
-		Action string                 `json:"action"`
-		Data   map[string]interface{} `json:"data"`
+		Action   string                 `json:"action"`
+		Data     map[string]interface{} `json:"data"`
+		PlayerID string                 `json:"player_id"`
 	}
 
 	if err := c.BodyParser(&action); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	playerID := action.PlayerID
+	if playerID == "" {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "player id required"})
 	}
 
 	success := game.GetGameManager().SubmitAction(gameID, playerID, action.Action, action.Data)

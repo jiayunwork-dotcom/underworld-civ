@@ -1,83 +1,82 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const WS_BASE = import.meta.env.VITE_WS_URL || (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws';
 
+async function request(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `请求失败: ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   async getGames() {
-    const res = await fetch(`${API_BASE}/games`);
-    return res.json();
+    return request(`${API_BASE}/games`);
   },
 
   async createGame(data, playerId, userName) {
-    const res = await fetch(`${API_BASE}/games`, {
+    return request(`${API_BASE}/games`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Player-ID': playerId,
-        'X-Username': userName
-      },
-      body: JSON.stringify(data)
+      body: JSON.stringify({
+        ...data,
+        player_id: playerId,
+        username: userName
+      })
     });
-    return res.json();
   },
 
   async getGame(gameId, playerId) {
-    const res = await fetch(`${API_BASE}/games/${gameId}`, {
-      headers: { 'X-Player-ID': playerId }
-    });
-    return res.json();
+    const url = playerId
+      ? `${API_BASE}/games/${gameId}?player_id=${encodeURIComponent(playerId)}`
+      : `${API_BASE}/games/${gameId}`;
+    return request(url);
   },
 
   async joinGame(gameId, data, playerId, userName) {
-    const res = await fetch(`${API_BASE}/games/${gameId}/join`, {
+    return request(`${API_BASE}/games/${gameId}/join`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Player-ID': playerId,
-        'X-Username': userName
-      },
-      body: JSON.stringify(data)
+      body: JSON.stringify({
+        ...data,
+        player_id: playerId,
+        username: userName
+      })
     });
-    return res.json();
   },
 
   async startGame(gameId, playerId) {
-    const res = await fetch(`${API_BASE}/games/${gameId}/start`, {
-      method: 'POST',
-      headers: { 'X-Player-ID': playerId }
+    return request(`${API_BASE}/games/${gameId}/start`, {
+      method: 'POST'
     });
-    return res.json();
   },
 
   async submitAction(gameId, playerId, action, data) {
-    const res = await fetch(`${API_BASE}/games/${gameId}/actions`, {
+    return request(`${API_BASE}/games/${gameId}/actions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Player-ID': playerId
-      },
-      body: JSON.stringify({ action, data })
+      body: JSON.stringify({ action, data, player_id: playerId })
     });
-    return res.json();
   },
 
   async getRaces() {
-    const res = await fetch(`${API_BASE}/races`);
-    return res.json();
+    return request(`${API_BASE}/races`);
   },
 
   async getBuildings() {
-    const res = await fetch(`${API_BASE}/buildings`);
-    return res.json();
+    return request(`${API_BASE}/buildings`);
   },
 
   async getUnits() {
-    const res = await fetch(`${API_BASE}/units`);
-    return res.json();
+    return request(`${API_BASE}/units`);
   },
 
   async getTechs() {
-    const res = await fetch(`${API_BASE}/techs`);
-    return res.json();
+    return request(`${API_BASE}/techs`);
   }
 };
 

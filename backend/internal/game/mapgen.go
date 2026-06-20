@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"math/rand"
 )
 
@@ -21,7 +22,7 @@ var LayerNames = []string{
 }
 
 func HexKey(q, r int) string {
-	return string(rune(q+1000)) + "," + string(rune(r+1000))
+	return fmt.Sprintf("%d,%d", q, r)
 }
 
 func HexCoordKey(c HexCoord) string {

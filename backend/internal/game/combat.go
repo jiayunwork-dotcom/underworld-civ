@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 )
@@ -140,7 +141,7 @@ func (gs *GameState) processCombat() {
 
 			if targetCell.Building.HP <= 0 {
 				buildingOwner := targetCell.Building.Owner
-				buildingKey := string(rune(targetLayer)) + "_" + HexCoordKey(target)
+				buildingKey := fmt.Sprintf("%d_%s", targetLayer, HexCoordKey(target))
 				if ownerPlayer, ok := gs.Players[buildingOwner]; ok {
 					delete(ownerPlayer.Buildings, buildingKey)
 				}
@@ -232,12 +233,13 @@ func (gs *GameState) retreatUnit(unit *Unit) {
 
 	for key, building := range player.Buildings {
 		if building.Type == BuildingMainBase && building.Completed {
-			layerIdx := int(key[0])
-			coordKey := key[2:]
+			var layerIdx int
+			var coordStr string
+			fmt.Sscanf(key, "%d_%s", &layerIdx, &coordStr)
 
 			for q := -10; q < 30 && !found; q++ {
 				for r := -10; r < 30 && !found; r++ {
-					if HexKey(q, r) == coordKey {
+					if HexKey(q, r) == coordStr {
 						mainBaseCoord = HexCoord{Q: q, R: r}
 						mainBaseLayer = layerIdx
 						found = true
