@@ -42,27 +42,28 @@ func (gs *GameState) processCombat() {
 
 		attackPower := float64(unit.Attack)
 		attackBonus := 1.0
+		attackFlatBonus := 0.0
 
 		raceInfo := RaceDefs[player.Race]
+		racialBoost := player.GetTechEffect("racial_bonus_boost")
+
 		if bonus, ok := raceInfo.Bonuses["attack"]; ok {
-			attackBonus += bonus
+			attackBonus += bonus * (1 + racialBoost)
 		}
 
-		for techID := range player.Techs {
-			tech := getTechByID(techID)
-			if tech != nil {
-				if bonus, ok := tech.Effects["attack"]; ok {
-					attackBonus += bonus
-				}
-				if unit.Type == UnitSiegeRam {
-					if bonus, ok := tech.Effects["siege_damage"]; ok {
-						attackBonus += bonus
-					}
-				}
-			}
+		attackBonus += player.GetTechEffect("attack_pct")
+		attackBonus += player.GetTechEffect("all_stats")
+		attackFlatBonus += player.GetTechEffect("attack_flat")
+
+		siegeBonus := player.GetTechEffect("siege_damage")
+		if unit.Type == UnitSiegeRam {
+			attackBonus += siegeBonus
 		}
 
-		attackPower *= attackBonus
+		attackPower = (attackPower + attackFlatBonus) * attackBonus
+
+		hpPctBonus := player.GetTechEffect("hp_pct")
+		unitMaxHP := float64(unit.MaxHP) * (1 + hpPctBonus + player.GetTechEffect("all_stats"))
 
 		defenderPlayerID := ""
 		if len(targetCell.Units) > 0 {
@@ -82,26 +83,28 @@ func (gs *GameState) processCombat() {
 
 			defensePower := float64(defenderUnit.Defense)
 			defenseBonus := 1.0
+			defenseFlatBonus := 0.0
 
 			if isAmbush {
 				defenseBonus += 0.5
 			}
 
 			if defender != nil {
-				for techID := range defender.Techs {
-					tech := getTechByID(techID)
-					if tech != nil {
-						if bonus, ok := tech.Effects["defense"]; ok {
-							defenseBonus += bonus
-						}
-					}
+				defenseBonus += defender.GetTechEffect("defense_pct")
+				defenseBonus += defender.GetTechEffect("all_stats")
+				defenseFlatBonus += defender.GetTechEffect("defense_flat")
+
+				if defenderUnit.Type == UnitInfantry {
+					defenseFlatBonus += defender.GetTechEffect("infantry_defense")
 				}
 			}
 
-			defensePower *= defenseBonus
+			defensePower = (defensePower + defenseFlatBonus) * defenseBonus
 
 			damage := math.Max(1, attackPower-defensePower/2)
 			damage = damage * (0.8 + rand.Float64()*0.4)
+
+			_ = unitMaxHP
 
 			defenderUnit.HP -= int(damage)
 
@@ -114,7 +117,18 @@ func (gs *GameState) processCombat() {
 
 			if distance <= 1 && !defenderUnit.Moved {
 				counterAttack := float64(defenderUnit.Attack) * 0.5
+				if defender != nil {
+					counterAttackFlat := defender.GetTechEffect("attack_flat")
+					counterAttackPct := 1 + defender.GetTechEffect("attack_pct") + defender.GetTechEffect("all_stats")
+					counterAttack = (counterAttack + counterAttackFlat) * counterAttackPct
+				}
 				unitDefense := float64(unit.Defense)
+				unitDefenseFlat := player.GetTechEffect("defense_flat")
+				unitDefensePct := 1 + player.GetTechEffect("defense_pct") + player.GetTechEffect("all_stats")
+				if unit.Type == UnitInfantry {
+					unitDefenseFlat += player.GetTechEffect("infantry_defense")
+				}
+				unitDefense = (unitDefense + unitDefenseFlat) * unitDefensePct
 				counterDamage := math.Max(1, counterAttack-unitDefense/2)
 
 				unit.HP -= int(counterDamage)
@@ -132,6 +146,7 @@ func (gs *GameState) processCombat() {
 			if unit.Type == UnitSiegeRam {
 				buildingDamage *= 3
 			}
+			buildingDamage *= (1 + player.GetTechEffect("building_damage"))
 
 			if targetCell.Building.Type == BuildingWall {
 				buildingDamage *= 0.5
@@ -214,7 +229,12 @@ func (gs *GameState) checkMoraleAndRoute(layerIdx int, coord HexCoord) {
 		}
 	}
 
-	if totalUnits > 0 && float64(lostUnits)/float64(totalUnits) > 0.6 {
+	moraleThreshold := 0.6 - player.GetTechEffect("morale_threshold")
+	if moraleThreshold < 0.1 {
+		moraleThreshold = 0.1
+	}
+
+	if totalUnits > 0 && float64(lostUnits)/float64(totalUnits) > moraleThreshold {
 		for _, u := range nearbyUnits {
 			if u.HP > 0 {
 				gs.retreatUnit(u)

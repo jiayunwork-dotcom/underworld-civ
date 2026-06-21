@@ -233,3 +233,151 @@ func GetUnits(c *fiber.Ctx) error {
 func GetTechs(c *fiber.Ctx) error {
 	return c.JSON(game.TechDefs)
 }
+
+type TechTreeNode struct {
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	Cost          int                `json:"cost"`
+	Category      game.TechCategory  `json:"category"`
+	Tier          int                `json:"tier"`
+	Prerequisites []string           `json:"prerequisites"`
+	Effects       map[string]float64 `json:"effects"`
+	RaceSpecific  game.Race          `json:"race_specific,omitempty"`
+	Researched    bool               `json:"researched"`
+	Progress      int                `json:"progress"`
+	IsCurrent     bool               `json:"is_current"`
+	CanResearch   bool               `json:"can_research"`
+	PrereqNames   map[string]string  `json:"prereq_names"`
+}
+
+func buildTechTree(player *game.PlayerState) []TechTreeNode {
+	result := make([]TechTreeNode, 0, len(game.TechDefs))
+	for _, tech := range game.TechDefs {
+		node := TechTreeNode{
+			ID:            tech.ID,
+			Name:          tech.Name,
+			Description:   tech.Description,
+			Cost:          tech.Cost,
+			Category:      tech.Category,
+			Tier:          tech.Tier,
+			Prerequisites: tech.Prerequisites,
+			Effects:       tech.Effects,
+			RaceSpecific:  tech.RaceSpecific,
+			Researched:    false,
+			Progress:      0,
+			IsCurrent:     false,
+			CanResearch:   false,
+			PrereqNames:   make(map[string]string),
+		}
+
+		if player != nil {
+			node.Researched = player.Techs[tech.ID]
+			if player.TechProgresses != nil {
+				node.Progress = player.TechProgresses[tech.ID]
+			}
+			node.IsCurrent = player.CurrentResearch == tech.ID
+			node.CanResearch = game.CheckPrerequisites(tech.ID, player.Techs) && !node.Researched
+		}
+
+		for _, prereqID := range tech.Prerequisites {
+			prereqTech := game.GetTechByID(prereqID)
+			if prereqTech != nil {
+				node.PrereqNames[prereqID] = prereqTech.Name
+			}
+		}
+
+		result = append(result, node)
+	}
+	return result
+}
+
+type GetTechTreeResponse struct {
+	TechDefs        []game.Tech                  `json:"tech_defs"`
+	MyTechTree      []TechTreeNode               `json:"my_tech_tree"`
+	PlayerResearch  map[string]interface{}       `json:"player_research"`
+	OpponentTechs   map[string][]string          `json:"opponent_techs"`
+}
+
+func GetTechTree(c *fiber.Ctx) error {
+	gameID := c.Params("id")
+	playerID := c.Query("player_id")
+
+	state, ok := game.GetGameManager().GetGame(gameID)
+	if !ok {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "game not found"})
+	}
+
+	player := state.Players[playerID]
+
+	opponentTechs := make(map[string][]string)
+	playerResearch := make(map[string]interface{})
+
+	for pid, p := range state.Players {
+		techList := make([]string, 0)
+		for techID, researched := range p.Techs {
+			if researched {
+				techList = append(techList, techID)
+			}
+		}
+		opponentTechs[pid] = techList
+
+		playerResearch[pid] = fiber.Map{
+			"username":          p.Username,
+			"color":             p.Color,
+			"race":              p.Race,
+			"current_research":  p.CurrentResearch,
+			"researched_count":  len(techList),
+			"research_points":   p.ResearchPoints,
+		}
+	}
+
+	var myTechTree []TechTreeNode
+	if player != nil {
+		myTechTree = buildTechTree(player)
+	}
+
+	return c.JSON(GetTechTreeResponse{
+		TechDefs:       game.TechDefs,
+		MyTechTree:     myTechTree,
+		PlayerResearch: playerResearch,
+		OpponentTechs:  opponentTechs,
+	})
+}
+
+type SetResearchRequest struct {
+	TechID   string `json:"tech_id"`
+	PlayerID string `json:"player_id"`
+}
+
+func SetResearch(c *fiber.Ctx) error {
+	gameID := c.Params("id")
+
+	var req SetResearchRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	if req.PlayerID == "" {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "player id required"})
+	}
+
+	state, ok := game.GetGameManager().GetGame(gameID)
+	if !ok {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "game not found"})
+	}
+
+	success, msg := state.SetCurrentResearch(req.PlayerID, req.TechID)
+	if !success {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": msg})
+	}
+
+	ws.GetHub().BroadcastToGame(gameID, "game_state", state)
+
+	player := state.Players[req.PlayerID]
+	return c.JSON(fiber.Map{
+		"message":          "research target updated",
+		"current_research": player.CurrentResearch,
+		"research_progress": player.ResearchProgress,
+	})
+}

@@ -1,14 +1,28 @@
 package game
 
 import (
+	"encoding/json"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
 )
 
+type SyncTechsFunc func(gameID string, playerID string, techs []string, currentResearch string, username string) error
+type SaveGameRecordFunc func(gameID string, turnNumber int, gameStateJSON string) error
+type SaveFinalGameFunc func(gameID string, status string, currentTurn int, winnerID string, endedAt time.Time, players map[string]PlayerStateForSave) error
+
+type PlayerStateForSave struct {
+	Score      int
+	Eliminated bool
+}
+
 type GameManager struct {
-	games map[string]*GameState
-	mu    sync.RWMutex
+	games           map[string]*GameState
+	mu              sync.RWMutex
+	SyncTechs       SyncTechsFunc
+	SaveGameRecord  SaveGameRecordFunc
+	SaveFinalGame   SaveFinalGameFunc
 }
 
 var manager = &GameManager{
@@ -80,9 +94,14 @@ func (gm *GameManager) runGameLoop(gameID string) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	gameEnded := false
+
 	for {
 		game, ok := gm.GetGame(gameID)
-		if !ok || game.Phase == PhaseEnded {
+		if !ok {
+			return
+		}
+		if game.Phase == PhaseEnded && gameEnded {
 			return
 		}
 
@@ -114,18 +133,77 @@ func (gm *GameManager) runGameLoop(gameID string) {
 
 				if shouldProcess {
 					g.ProcessTurn()
+					gm.syncTechsToRedis(g)
+					gm.saveGameRecordToDB(g)
 
 					if g.Phase != PhaseEnded {
 						g.PlanningEndsAt = time.Now().Add(90 * time.Second)
 						for _, player := range g.Players {
 							player.Ready = false
 						}
+					} else {
+						gm.saveFinalGameToDB(g)
+						gameEnded = true
 					}
 				}
 			}
 		}
 		gm.mu.Unlock()
 	}
+}
+
+func (gm *GameManager) syncTechsToRedis(g *GameState) {
+	if gm.SyncTechs == nil {
+		return
+	}
+	for pid, player := range g.Players {
+		techList := make([]string, 0)
+		for techID, researched := range player.Techs {
+			if researched {
+				techList = append(techList, techID)
+			}
+		}
+		err := gm.SyncTechs(g.ID, pid, techList, player.CurrentResearch, player.Username)
+		if err != nil {
+			log.Printf("Warning: Failed to sync techs to Redis for player %s: %v", pid, err)
+		}
+	}
+}
+
+func (gm *GameManager) saveGameRecordToDB(g *GameState) {
+	if gm.SaveGameRecord == nil {
+		return
+	}
+	stateJSON, err := json.Marshal(g)
+	if err != nil {
+		log.Printf("Warning: Failed to marshal game state: %v", err)
+		return
+	}
+	err = gm.SaveGameRecord(g.ID, g.CurrentTurn, string(stateJSON))
+	if err != nil {
+		log.Printf("Warning: Failed to save game record to DB: %v", err)
+	}
+}
+
+func (gm *GameManager) saveFinalGameToDB(g *GameState) {
+	if gm.SaveFinalGame == nil {
+		return
+	}
+
+	players := make(map[string]PlayerStateForSave)
+	for pid, player := range g.Players {
+		players[pid] = PlayerStateForSave{
+			Score:      player.Score,
+			Eliminated: player.Eliminated,
+		}
+	}
+
+	err := gm.SaveFinalGame(g.ID, g.Status, g.CurrentTurn, g.WinnerID, time.Now(), players)
+	if err != nil {
+		log.Printf("Warning: Failed to save final game to DB: %v", err)
+	}
+
+	gm.saveGameRecordToDB(g)
 }
 
 func (gm *GameManager) SubmitAction(gameID, playerID, action string, data map[string]interface{}) bool {
@@ -150,6 +228,12 @@ func (gm *GameManager) SubmitAction(gameID, playerID, action string, data map[st
 	if action == "unready" {
 		player.Ready = false
 		return true
+	}
+
+	if action == "set_research" {
+		techID, _ := data["tech_id"].(string)
+		ok, _ := game.SetCurrentResearch(playerID, techID)
+		return ok
 	}
 
 	game.SubmitAction(playerID, action, data)

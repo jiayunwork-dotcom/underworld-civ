@@ -77,6 +77,23 @@ export const api = {
 
   async getTechs() {
     return request(`${API_BASE}/techs`);
+  },
+
+  async getTechTree(gameId, playerId) {
+    const url = playerId
+      ? `${API_BASE}/games/${gameId}/tech-tree?player_id=${encodeURIComponent(playerId)}`
+      : `${API_BASE}/games/${gameId}/tech-tree`;
+    return request(url);
+  },
+
+  async setResearch(gameId, playerId, techId) {
+    return request(`${API_BASE}/games/${gameId}/tech-tree`, {
+      method: 'POST',
+      body: JSON.stringify({
+        player_id: playerId,
+        tech_id: techId
+      })
+    });
   }
 };
 

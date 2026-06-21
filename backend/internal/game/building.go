@@ -18,6 +18,7 @@ const (
 	BuildingCrystalTower   BuildingType = "crystal_tower"
 	BuildingPetrifiedWall  BuildingType = "petrified_wall"
 	BuildingHiveRift       BuildingType = "hive_rift"
+	BuildingWaterPurifier  BuildingType = "water_purifier"
 	BuildingMainBase       BuildingType = "main_base"
 )
 

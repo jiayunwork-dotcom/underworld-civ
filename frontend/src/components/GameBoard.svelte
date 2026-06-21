@@ -19,6 +19,7 @@
   let showBuildingMenu = false;
   let buildingMenuCell = null;
   let buildingMenuPosition = { x: 0, y: 0 };
+  let showTechModal = false;
 
   $: {
     game = $gameState;
@@ -208,7 +209,16 @@
   <div class="top-bar">
     <ResourceBar player={currentPlayer} />
     <TurnInfo game={game} playerId={$playerID} gameId={game?.id} />
-    <button class="btn-exit" on:click={exitGame}>退出</button>
+    <div class="top-bar-buttons">
+      <button class="btn-tech" on:click={() => showTechModal = true}>
+        <span class="btn-tech-icon">🔬</span>
+        <span class="btn-tech-text">科技</span>
+        {#if currentPlayer?.current_research}
+          <span class="btn-tech-badge">⚡</span>
+        {/if}
+      </button>
+      <button class="btn-exit" on:click={exitGame}>退出</button>
+    </div>
   </div>
 
   <div class="main-content">
@@ -247,7 +257,7 @@
         {:else if activeTab === 'units'}
           <UnitPanel player={currentPlayer} />
         {:else if activeTab === 'tech'}
-          <TechPanel player={currentPlayer} />
+          <TechPanel player={currentPlayer} gameId={game?.id} />
         {:else if activeTab === 'diplomacy'}
           <DiplomacyPanel game={game} playerId={$playerID} />
         {/if}
@@ -277,6 +287,20 @@
               onSelect={selectBuilding}
               onClose={closeBuildingMenu}
             />
+          </div>
+        </div>
+      {/if}
+
+      {#if showTechModal}
+        <div class="tech-modal-overlay" on:click={() => showTechModal = false}>
+          <div class="tech-modal" on:click|stopPropagation>
+            <div class="tech-modal-header">
+              <h2>🔬 科技研究中心</h2>
+              <button class="tech-modal-close" on:click={() => showTechModal = false}>✕</button>
+            </div>
+            <div class="tech-modal-body">
+              <TechPanel player={currentPlayer} gameId={game?.id} />
+            </div>
           </div>
         </div>
       {/if}
@@ -384,6 +408,55 @@
     padding: 10px 20px;
     background: #16213e;
     border-bottom: 1px solid #2c3e50;
+  }
+
+  .top-bar-buttons {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .btn-tech {
+    position: relative;
+    background: linear-gradient(135deg, #9b59b6, #8e44ad);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: bold;
+    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(155, 89, 182, 0.3);
+  }
+
+  .btn-tech:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(155, 89, 182, 0.5);
+    filter: brightness(1.1);
+  }
+
+  .btn-tech-icon {
+    font-size: 1.1rem;
+  }
+
+  .btn-tech-text {
+    font-size: 0.85rem;
+  }
+
+  .btn-tech-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 0.8rem;
+    animation: techBadgePulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes techBadgePulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.7; }
   }
 
   .btn-exit {
@@ -703,5 +776,105 @@
     .left-panel, .right-panel {
       width: 200px;
     }
+  }
+
+  .tech-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+    animation: fadeIn 0.2s ease-out;
+    backdrop-filter: blur(4px);
+  }
+
+  .tech-modal {
+    width: 90%;
+    max-width: 900px;
+    max-height: 85vh;
+    background: #0f1624;
+    border: 1px solid #34495e;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+                0 0 40px rgba(155, 89, 182, 0.15);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: techModalIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes techModalIn {
+    from {
+      opacity: 0;
+      transform: scale(0.9) translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .tech-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: linear-gradient(135deg, rgba(155, 89, 182, 0.2), rgba(52, 73, 94, 0.3));
+    border-bottom: 1px solid #34495e;
+  }
+
+  .tech-modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #ecf0f1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tech-modal-close {
+    background: rgba(231, 76, 60, 0.2);
+    color: #e74c3c;
+    border: 1px solid rgba(231, 76, 60, 0.3);
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .tech-modal-close:hover {
+    background: rgba(231, 76, 60, 0.4);
+    transform: scale(1.1);
+  }
+
+  .tech-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .tech-modal-body::-webkit-scrollbar {
+    width: 8px;
+  }
+  .tech-modal-body::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+  }
+  .tech-modal-body::-webkit-scrollbar-thumb {
+    background: #34495e;
+    border-radius: 4px;
+  }
+  .tech-modal-body::-webkit-scrollbar-thumb:hover {
+    background: #4a6278;
   }
 </style>

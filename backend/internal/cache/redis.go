@@ -92,3 +92,46 @@ func GetRoomPlayers(gameID string) (map[string]string, error) {
 	key := fmt.Sprintf("room:%s:players", gameID)
 	return RDB.HGetAll(ctx, key).Result()
 }
+
+type PlayerTechPublic struct {
+	Techs      []string `json:"techs"`
+	Current    string   `json:"current_research"`
+	PlayerID   string   `json:"player_id"`
+	Username   string   `json:"username"`
+}
+
+func SyncPlayerTechs(gameID string, playerID string, techs []string, currentResearch string, username string) error {
+	key := fmt.Sprintf("game:%s:techs", gameID)
+	data := PlayerTechPublic{
+		Techs:    techs,
+		Current:  currentResearch,
+		PlayerID: playerID,
+		Username: username,
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return RDB.HSet(ctx, key, playerID, jsonData).Err()
+}
+
+func GetAllPlayerTechs(gameID string) (map[string]PlayerTechPublic, error) {
+	key := fmt.Sprintf("game:%s:techs", gameID)
+	rawData, err := RDB.HGetAll(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]PlayerTechPublic)
+	for pid, raw := range rawData {
+		var ptp PlayerTechPublic
+		if err := json.Unmarshal([]byte(raw), &ptp); err == nil {
+			result[pid] = ptp
+		}
+	}
+	return result, nil
+}
+
+func DeletePlayerTechs(gameID string) error {
+	key := fmt.Sprintf("game:%s:techs", gameID)
+	return RDB.Del(ctx, key).Err()
+}

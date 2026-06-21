@@ -8,6 +8,7 @@ import (
 	"underworld-civ/internal/db"
 	"underworld-civ/internal/game"
 	"underworld-civ/internal/handlers"
+	"underworld-civ/internal/models"
 	"underworld-civ/internal/ws"
 
 	"github.com/gofiber/contrib/websocket"
@@ -30,6 +31,8 @@ func main() {
 	} else {
 		log.Println("Redis connected successfully")
 	}
+
+	setupGameManagerCallbacks()
 
 	go ws.GetHub().Run()
 
@@ -62,6 +65,8 @@ func main() {
 	api.Get("/buildings", handlers.GetBuildings)
 	api.Get("/units", handlers.GetUnits)
 	api.Get("/techs", handlers.GetTechs)
+	api.Get("/games/:id/tech-tree", handlers.GetTechTree)
+	api.Post("/games/:id/tech-tree", handlers.SetResearch)
 
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
@@ -99,5 +104,58 @@ func gameStateBroadcaster() {
 				hub.BroadcastToGame(g.ID, "game_state", g)
 			}
 		}
+	}
+}
+
+func setupGameManagerCallbacks() {
+	gm := game.GetGameManager()
+
+	gm.SyncTechs = func(gameID string, playerID string, techs []string, currentResearch string, username string) error {
+		return cache.SyncPlayerTechs(gameID, playerID, techs, currentResearch, username)
+	}
+
+	gm.SaveGameRecord = func(gameID string, turnNumber int, gameStateJSON string) error {
+		if db.DB == nil {
+			return nil
+		}
+		type GameRecordDB struct {
+			GameID     string `gorm:"column:game_id;type:uuid"`
+			TurnNumber int    `gorm:"column:turn_number"`
+			GameState  string `gorm:"column:game_state;type:jsonb"`
+		}
+		record := GameRecordDB{
+			GameID:     gameID,
+			TurnNumber: turnNumber,
+			GameState:  gameStateJSON,
+		}
+		return db.DB.Table("game_records").Create(&record).Error
+	}
+
+	gm.SaveFinalGame = func(gameID string, status string, currentTurn int, winnerID string, endedAt time.Time, players map[string]game.PlayerStateForSave) error {
+		if db.DB == nil {
+			return nil
+		}
+
+		var gameModel models.Game
+		result := db.DB.Where("id = ?", gameID).First(&gameModel)
+		if result.Error == nil {
+			gameModel.Status = status
+			gameModel.CurrentTurn = currentTurn
+			gameModel.WinnerID = winnerID
+			gameModel.EndedAt = endedAt
+			db.DB.Save(&gameModel)
+		}
+
+		for pid, player := range players {
+			var gp models.GamePlayer
+			result := db.DB.Where("game_id = ? AND player_id = ?", gameID, pid).First(&gp)
+			if result.Error == nil {
+				gp.Score = player.Score
+				gp.Eliminated = player.Eliminated
+				db.DB.Save(&gp)
+			}
+		}
+
+		return nil
 	}
 }

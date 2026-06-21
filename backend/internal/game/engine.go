@@ -28,25 +28,28 @@ func NewGameState(name string, maxPlayers int, seed int64) *GameState {
 
 func (gs *GameState) AddPlayer(playerID, username string, race Race, color string, isHost bool) {
 	player := &PlayerState{
-		PlayerID:       playerID,
-		Username:       username,
-		Race:           race,
-		Color:          color,
-		IsHost:         isHost,
-		Resources:      ResourceStorage{Resources: Resources{Stone: 100, Metal: 50, GlowMushroom: 80, Water: 60, MagicCrystal: 10, FossilFuel: 20}, Capacity: 500},
-		Production:     ResourceProduction{},
-		Population:     10,
-		PopulationCap:  20,
-		ResearchPoints: 0,
-		Techs:          make(map[string]bool),
-		ResearchQueue:  make([]string, 0),
-		Units:          make([]Unit, 0),
-		Buildings:      make(map[string]*Building),
-		VisionRange:    3,
-		Diplomacy:      make(map[string]*DiplomaticRelation),
-		TradeOffers:    make([]TradeOffer, 0),
-		Embargoes:      make([]Embargo, 0),
-		Ready:          false,
+		PlayerID:        playerID,
+		Username:        username,
+		Race:            race,
+		Color:           color,
+		IsHost:          isHost,
+		Resources:       ResourceStorage{Resources: Resources{Stone: 100, Metal: 50, GlowMushroom: 80, Water: 60, MagicCrystal: 10, FossilFuel: 20}, Capacity: 500},
+		Production:      ResourceProduction{},
+		Population:      10,
+		PopulationCap:   20,
+		ResearchPoints:  0,
+		Techs:           make(map[string]bool),
+		TechProgresses:  make(map[string]int),
+		ResearchQueue:   make([]string, 0),
+		CurrentResearch: "",
+		ResearchProgress: 0,
+		Units:           make([]Unit, 0),
+		Buildings:       make(map[string]*Building),
+		VisionRange:     3,
+		Diplomacy:       make(map[string]*DiplomaticRelation),
+		TradeOffers:     make([]TradeOffer, 0),
+		Embargoes:       make([]Embargo, 0),
+		Ready:           false,
 	}
 
 	raceInfo := RaceDefs[race]
@@ -150,7 +153,9 @@ func (gs *GameState) calculateProduction(player *PlayerState) {
 		case BuildingFungusFarm:
 			prod.GlowMushroom += 3
 		case BuildingAcademy:
-			prod.MagicCrystal += 0
+			prod.MagicCrystal += 1
+		case BuildingWaterPurifier:
+			prod.Water += 2
 		}
 	}
 
@@ -170,50 +175,58 @@ func (gs *GameState) calculateProduction(player *PlayerState) {
 					prod.MagicCrystal += 1
 				case "fossil_fuel":
 					prod.FossilFuel += 2
+				case "water_vein":
+					prod.Water += 2
 				}
 			}
 		}
 	}
 
 	raceInfo := RaceDefs[player.Race]
+	racialBoost := player.GetTechEffect("racial_bonus_boost")
+
 	if bonus, ok := raceInfo.Bonuses["metal_production"]; ok {
-		prod.Metal = int(float64(prod.Metal) * (1 + bonus))
+		prod.Metal = int(float64(prod.Metal) * (1 + bonus*(1+racialBoost)))
 	}
 	if bonus, ok := raceInfo.Bonuses["fungus_production"]; ok {
-		prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + bonus))
+		prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + bonus*(1+racialBoost)))
+	}
+	if _, ok := raceInfo.Bonuses["mining_speed"]; ok {
 	}
 
-	for techID := range player.Techs {
-		tech := getTechByID(techID)
-		if tech != nil {
-			if bonus, ok := tech.Effects["metal_production"]; ok {
-				prod.Metal = int(float64(prod.Metal) * (1 + bonus))
-			}
-			if bonus, ok := tech.Effects["fungus_production"]; ok {
-				prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + bonus))
-			}
-			if bonus, ok := tech.Effects["all_production"]; ok {
-				prod.Stone = int(float64(prod.Stone) * (1 + bonus))
-				prod.Metal = int(float64(prod.Metal) * (1 + bonus))
-				prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + bonus))
-				prod.Water = int(float64(prod.Water) * (1 + bonus))
-				prod.MagicCrystal = int(float64(prod.MagicCrystal) * (1 + bonus))
-				prod.FossilFuel = int(float64(prod.FossilFuel) * (1 + bonus))
-			}
-		}
+	stoneBonus := player.GetTechEffect("stone_production")
+	metalBonus := player.GetTechEffect("metal_production")
+	fungusBonus := player.GetTechEffect("fungus_production")
+	waterBonus := player.GetTechEffect("water_production")
+	crystalBonus := player.GetTechEffect("crystal_production")
+	fossilBonus := player.GetTechEffect("fossil_production")
+	allBonus := player.GetTechEffect("all_production")
+	allStatsBonus := player.GetTechEffect("all_stats")
+
+	prod.Stone = int(float64(prod.Stone) * (1 + stoneBonus + allBonus + allStatsBonus))
+	prod.Metal = int(float64(prod.Metal) * (1 + metalBonus + allBonus + allStatsBonus))
+	prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + fungusBonus + allBonus + allStatsBonus))
+	prod.Water = int(float64(prod.Water) * (1 + waterBonus + allBonus + allStatsBonus))
+	prod.MagicCrystal = int(float64(prod.MagicCrystal) * (1 + crystalBonus + allBonus + allStatsBonus))
+	prod.FossilFuel = int(float64(prod.FossilFuel) * (1 + fossilBonus + allBonus + allStatsBonus))
+
+	storageCapBonus := player.GetTechEffect("storage_cap")
+	player.Resources.Capacity = int(float64(500) * (1 + storageCapBonus))
+
+	popCapBonus := player.GetTechEffect("population_cap")
+	player.PopulationCap = int(float64(20) * (1 + popCapBonus))
+
+	visionBonus := player.GetTechEffect("vision_range")
+	baseVision := 3
+	if vb, ok := raceInfo.Bonuses["vision_range"]; ok {
+		baseVision += int(vb)
 	}
+	player.VisionRange = baseVision + int(visionBonus)
 
 	player.Production = prod
 }
 
-func getTechByID(id string) *Tech {
-	for i := range TechDefs {
-		if TechDefs[i].ID == id {
-			return &TechDefs[i]
-		}
-	}
-	return nil
-}
+
 
 func (gs *GameState) ProcessTurn() {
 	if gs.Phase != PhasePlanning {
@@ -264,21 +277,18 @@ func (gs *GameState) processProduction() {
 }
 
 func (gs *GameState) calculateResearchPoints(player *PlayerState) int {
-	points := 0
+	points := 2
 
 	for _, building := range player.Buildings {
 		if building.Completed && building.Type == BuildingAcademy {
-			points++
+			points += 3
 		}
 	}
 
-	for techID := range player.Techs {
-		tech := getTechByID(techID)
-		if tech != nil {
-			if bonus, ok := tech.Effects["research_point"]; ok {
-				points += int(bonus)
-			}
-		}
+	points += int(player.GetTechEffect("research_point"))
+
+	if points < 1 {
+		points = 1
 	}
 
 	return points
@@ -352,25 +362,48 @@ func (gs *GameState) processMining() {
 
 			miningSpeed := 1.0
 			raceInfo := RaceDefs[player.Race]
+			racialBoost := player.GetTechEffect("racial_bonus_boost")
+
 			if bonus, ok := raceInfo.Bonuses["mining_speed"]; ok {
-				miningSpeed *= bonus
+				miningSpeed *= bonus * (1 + racialBoost)
 			}
 
-			if player.Techs["basic_mining"] {
-				miningSpeed *= 1.2
+			miningSpeedBonus := player.GetTechEffect("mining_speed")
+			miningSpeed *= (1 + miningSpeedBonus)
+
+			hardRockBonus := player.GetTechEffect("hard_rock_bonus")
+			if cell.RockHardness >= 5 {
+				miningSpeed *= (1 + hardRockBonus)
 			}
-			if player.Techs["advanced_mining"] {
-				miningSpeed *= 1.3
+
+			deepLayerBonus := player.GetTechEffect("deep_layer_bonus")
+			if layerIdx >= 2 && deepLayerBonus > 0 {
 			}
 
 			cell.MiningProgress += int(miningSpeed)
 			if cell.MiningProgress >= cell.MiningTotal {
-				collapseChance := cell.WaterContent * 0.1
-				if player.Techs["support_beams"] {
-					collapseChance *= 0.5
+				collapseChance := cell.WaterContent * 0.15
+				collapseReduction := player.GetTechEffect("collapse_chance")
+				collapseChance *= (1 - collapseReduction)
+				if collapseChance < 0 {
+					collapseChance = 0
 				}
 
-				if rand.Float64() < collapseChance {
+				collapseSave := player.GetTechEffect("collapse_save")
+				collapseRoll := rand.Float64()
+
+				if collapseRoll < collapseChance {
+					if collapseRoll < collapseChance*collapseSave {
+						cell.IsWall = false
+						cell.Owner = cell.MiningOwner
+						cell.Discovered = true
+						cell.MiningOwner = ""
+						cell.MiningProgress = 0
+						cell.MiningTotal = 0
+						gs.revealArea(player, layerIdx, cell.Coord, 2)
+						continue
+					}
+
 					cell.MiningOwner = ""
 					cell.MiningProgress = 0
 					cell.MiningTotal = 0
@@ -381,13 +414,34 @@ func (gs *GameState) processMining() {
 						Layer:    layerIdx,
 						Location: cell.Coord,
 					})
-					player.Resources.Stone = max(0, player.Resources.Stone-10)
+					damageReduction := player.GetTechEffect("event_damage_reduction")
+					lossStone := int(float64(10) * (1 - damageReduction))
+					player.Resources.Stone = max(0, player.Resources.Stone-lossStone)
 					continue
 				}
 
 				cell.IsWall = false
 				cell.Owner = cell.MiningOwner
 				cell.Discovered = true
+
+				bonusChance := player.GetTechEffect("bonus_mineral_chance")
+				if cell.MineralType == "none" && rand.Float64() < bonusChance {
+					minerals := []string{"stone", "iron", "copper", "glow_mushroom", "magic_crystal", "fossil_fuel"}
+					cell.MineralType = minerals[rand.Intn(len(minerals))]
+					switch cell.MineralType {
+					case "stone":
+						player.Resources.Stone = min(player.Resources.Stone+15, player.Resources.Capacity)
+					case "iron", "copper":
+						player.Resources.Metal = min(player.Resources.Metal+10, player.Resources.Capacity)
+					case "glow_mushroom":
+						player.Resources.GlowMushroom = min(player.Resources.GlowMushroom+10, player.Resources.Capacity)
+					case "magic_crystal":
+						player.Resources.MagicCrystal = min(player.Resources.MagicCrystal+5, player.Resources.Capacity)
+					case "fossil_fuel":
+						player.Resources.FossilFuel = min(player.Resources.FossilFuel+8, player.Resources.Capacity)
+					}
+				}
+
 				cell.MiningOwner = ""
 				cell.MiningProgress = 0
 				cell.MiningTotal = 0
@@ -458,11 +512,24 @@ func (gs *GameState) processBuilding() {
 		}
 
 		hpBonus := 1.0
+		racialBoost := player.GetTechEffect("racial_bonus_boost")
 		if bonus, ok := RaceDefs[player.Race].Bonuses["building_hp"]; ok {
-			hpBonus = bonus
+			hpBonus = bonus * (1 + racialBoost)
 		}
+
+		buildingHPBonus := player.GetTechEffect("building_hp")
+		hpBonus *= (1 + buildingHPBonus)
+
+		allStatsBonus := player.GetTechEffect("all_stats")
+		hpBonus *= (1 + allStatsBonus)
+
 		building.HP = int(float64(building.HP) * hpBonus)
 		building.MaxHP = building.HP
+
+		elevatorBonus := player.GetTechEffect("elevator_speed")
+		if building.Type == BuildingElevator {
+			building.BuildTime = int(float64(building.BuildTime) / (1 + elevatorBonus))
+		}
 
 		cell.Building = building
 		buildingKey := fmt.Sprintf("%d_%s", layerIdx, HexCoordKey(coord))
@@ -476,10 +543,7 @@ func (gs *GameState) processBuilding() {
 
 		for _, building := range player.Buildings {
 			if !building.Completed {
-				buildSpeed := 1.0
-				if player.Techs["stonecutting"] {
-					buildSpeed += 0.25
-				}
+				buildSpeed := 1.0 + player.GetTechEffect("build_speed")
 
 				building.Progress += int(float64(1) * buildSpeed)
 				if building.Progress >= building.BuildTime {
@@ -524,39 +588,100 @@ func (gs *GameState) processResearch() {
 
 		if player.CurrentResearch == "" {
 			if len(player.ResearchQueue) > 0 {
-				player.CurrentResearch = player.ResearchQueue[0]
-				player.ResearchQueue = player.ResearchQueue[1:]
+				for len(player.ResearchQueue) > 0 {
+					nextTech := player.ResearchQueue[0]
+					player.ResearchQueue = player.ResearchQueue[1:]
+					if CheckPrerequisites(nextTech, player.Techs) && !player.Techs[nextTech] {
+						player.CurrentResearch = nextTech
+						break
+					}
+				}
 			}
+			if player.CurrentResearch == "" {
+				continue
+			}
+		}
+
+		tech := GetTechByID(player.CurrentResearch)
+		if tech == nil || player.Techs[player.CurrentResearch] {
+			player.CurrentResearch = ""
 			continue
 		}
 
-		tech := getTechByID(player.CurrentResearch)
-		if tech == nil {
+		if !CheckPrerequisites(player.CurrentResearch, player.Techs) {
 			player.CurrentResearch = ""
 			continue
 		}
 
 		researchSpeed := 1.0
-		if player.Techs["scientific_method"] {
-			researchSpeed += 0.3
-		}
-		if player.Techs["crystal_resonance"] {
-			researchSpeed += 0.2
-		}
+		researchSpeed += player.GetTechEffect("research_speed")
 
-		player.ResearchProgress += int(float64(player.ResearchPoints) * researchSpeed)
+		if player.TechProgresses == nil {
+			player.TechProgresses = make(map[string]int)
+		}
+		savedProgress := player.TechProgresses[player.CurrentResearch]
+		player.ResearchProgress = savedProgress
+
+		gainedPoints := int(float64(player.ResearchPoints) * researchSpeed)
+		player.ResearchProgress += gainedPoints
+		player.TechProgresses[player.CurrentResearch] = player.ResearchProgress
 
 		if player.ResearchProgress >= tech.Cost {
 			player.Techs[player.CurrentResearch] = true
+			player.TechProgresses[player.CurrentResearch] = tech.Cost
 			player.ResearchProgress = 0
+			completedTechID := player.CurrentResearch
 			player.CurrentResearch = ""
 
+			gs.addEvent(GameEvent{
+				Type:     EventRandomGood,
+				Message:  "科技研究完成：" + tech.Name + "！",
+				Turn:     gs.CurrentTurn,
+				Location: HexCoord{},
+			})
+
 			if len(player.ResearchQueue) > 0 {
-				player.CurrentResearch = player.ResearchQueue[0]
-				player.ResearchQueue = player.ResearchQueue[1:]
+				for len(player.ResearchQueue) > 0 {
+					nextTech := player.ResearchQueue[0]
+					player.ResearchQueue = player.ResearchQueue[1:]
+					if CheckPrerequisites(nextTech, player.Techs) && !player.Techs[nextTech] {
+						player.CurrentResearch = nextTech
+						break
+					}
+				}
 			}
+
+			_ = completedTechID
 		}
 	}
+}
+
+func (gs *GameState) SetCurrentResearch(playerID, techID string) (bool, string) {
+	player, ok := gs.Players[playerID]
+	if !ok || player.Eliminated {
+		return false, "玩家不存在或已被淘汰"
+	}
+
+	if techID == "" {
+		player.CurrentResearch = ""
+		return true, ""
+	}
+
+	tech := GetTechByID(techID)
+	if tech == nil {
+		return false, "科技不存在"
+	}
+
+	if player.Techs[techID] {
+		return false, "该科技已研究完成"
+	}
+
+	if !CheckPrerequisites(techID, player.Techs) {
+		return false, "前置科技未完成"
+	}
+
+	player.CurrentResearch = techID
+	return true, ""
 }
 
 func (gs *GameState) processUnitMovement() {
@@ -583,16 +708,21 @@ func (gs *GameState) processUnitMovement() {
 		if toLayer != unit.Layer {
 			layer := gs.Map.Layers[unit.Layer]
 			cell, _ := GetCell(layer, unit.Coord)
+			hasElevator := cell.Building != nil && cell.Building.Type == BuildingElevator
+			hasCrossLayerTech := player.GetTechEffect("cross_layer_move") > 0
 			if !cell.IsShaft && cell.Building == nil {
 				continue
 			}
-			if cell.Building != nil && cell.Building.Type != BuildingElevator {
+			if cell.Building != nil && cell.Building.Type != BuildingElevator && !hasCrossLayerTech {
 				continue
 			}
+			_ = hasElevator
 		}
 
+		moveBonus := int(player.GetTechEffect("move_speed"))
+		totalSpeed := unit.Speed + moveBonus
 		distance := HexDistance(unit.Coord, to)
-		if distance > unit.Speed {
+		if distance > totalSpeed {
 			continue
 		}
 
@@ -753,7 +883,7 @@ func (gs *GameState) checkVictoryConditions() {
 
 	for _, playerID := range gs.TurnOrder {
 		player := gs.Players[playerID]
-		if len(player.Techs) >= len(TechDefs) {
+		if player.Techs["spc_10_ascension"] {
 			gs.WinnerID = playerID
 			gs.VictoryType = "tech"
 			gs.Phase = PhaseEnded
