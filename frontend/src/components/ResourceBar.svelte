@@ -1,4 +1,6 @@
 <script>
+  import { resourceDeltas } from '../stores/game.js';
+
   export let player;
 
   const resourceInfo = [
@@ -11,24 +13,63 @@
   ];
 
   function getResource(res, key) {
-    return res?.resources?.[key] || 0;
+    return res?.resources?.[key] ?? res?.[key] ?? 0;
   }
 
   function getProduction(prod, key) {
     return prod?.[key] || 0;
   }
+
+  function isLowResource(player, key) {
+    const amount = getResource(player?.resources, key);
+    const production = getProduction(player?.production, key);
+    return amount < 20 && production <= 0;
+  }
+
+  function getDelta(key) {
+    return $resourceDeltas[key] || 0;
+  }
+
+  function hasPositiveDelta(key) {
+    return getDelta(key) > 0;
+  }
+
+  function hasNegativeDelta(key) {
+    return getDelta(key) < 0;
+  }
 </script>
 
 <div class="resource-bar">
   {#each resourceInfo as res}
-    <div class="resource-item" title={res.name}>
+    <div class="resource-item {isLowResource(player, res.key) ? 'warning' : ''}" title={res.name}>
       <span class="icon">{res.icon}</span>
       <span class="value" style="color: {res.color}">
         {getResource(player?.resources, res.key)}
       </span>
-      <span class="production">
-        (+{getProduction(player?.production, res.key)})
-      </span>
+      {#if hasPositiveDelta(res.key)}
+        <span class="delta positive">
+          <span class="arrow">↑</span>
+          +{getDelta(res.key)}
+        </span>
+      {:else if hasNegativeDelta(res.key)}
+        <span class="delta negative">
+          <span class="arrow">↓</span>
+          {getDelta(res.key)}
+        </span>
+      {:else}
+        <span class="production">
+          {#if getProduction(player?.production, res.key) > 0}
+            <span class="prod-positive">+{getProduction(player?.production, res.key)}</span>
+          {:else if getProduction(player?.production, res.key) < 0}
+            <span class="prod-negative">{getProduction(player?.production, res.key)}</span>
+          {:else}
+            <span class="prod-neutral">+0</span>
+          {/if}
+        </span>
+      {/if}
+      {#if isLowResource(player, res.key)}
+        <span class="warning-icon">⚠️</span>
+      {/if}
     </div>
   {/each}
 
@@ -46,7 +87,7 @@
 <style>
   .resource-bar {
     display: flex;
-    gap: 16px;
+    gap: 12px;
     flex: 1;
     flex-wrap: wrap;
   }
@@ -59,6 +100,24 @@
     padding: 6px 12px;
     border-radius: 6px;
     font-size: 0.9rem;
+    position: relative;
+    transition: all 0.3s;
+    border: 1px solid transparent;
+  }
+
+  .resource-item.warning {
+    background: rgba(231, 76, 60, 0.2);
+    border-color: #e74c3c;
+    animation: pulse-warning 1.5s infinite;
+  }
+
+  @keyframes pulse-warning {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 8px 2px rgba(231, 76, 60, 0.3);
+    }
   }
 
   .icon {
@@ -68,11 +127,71 @@
   .value {
     font-weight: bold;
     color: #ecf0f1;
+    font-variant-numeric: tabular-nums;
+    min-width: 30px;
+    text-align: right;
   }
 
   .production {
     font-size: 0.75rem;
+  }
+
+  .prod-positive {
     color: #2ecc71;
+  }
+
+  .prod-negative {
+    color: #e74c3c;
+  }
+
+  .prod-neutral {
+    color: #7f8c8d;
+  }
+
+  .delta {
+    font-size: 0.75rem;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    animation: delta-pop 0.5s ease-out;
+  }
+
+  .delta .arrow {
+    font-size: 0.65rem;
+  }
+
+  .delta.positive {
+    color: #2ecc71;
+  }
+
+  .delta.negative {
+    color: #e74c3c;
+  }
+
+  @keyframes delta-pop {
+    0% {
+      transform: scale(1.3);
+      opacity: 0;
+    }
+    50% {
+      transform: scale(1.1);
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .warning-icon {
+    font-size: 0.8rem;
+    animation: shake 0.5s ease-in-out infinite;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-1px); }
+    75% { transform: translateX(1px); }
   }
 
   .population .value {

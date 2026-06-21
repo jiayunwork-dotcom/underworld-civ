@@ -7,6 +7,7 @@
   export let playerId;
   export let selectedCell;
   export let buildMode;
+  export let operationMode;
   export let onCellClick;
   export let onMine;
   export let onMove;
@@ -20,6 +21,8 @@
   let isDragging = false;
   let dragStart = { x: 0, y: 0 };
   let hoveredCell = null;
+  let animFrame = 0;
+  let animationId = null;
 
   const layerColors = [
     { wall: '#3d5a3d', floor: '#2a3f2a', accent: '#7cb87c' },
@@ -40,6 +43,25 @@
     fossil_fuel: '#1a1a1a'
   };
 
+  const buildingIcons = {
+    main_base: '🏰',
+    living_quarters: '🏠',
+    workshop: '🔧',
+    fungus_farm: '🍄',
+    smelter: '🏭',
+    academy: '📚',
+    altar: '⛩️',
+    warehouse: '📦',
+    watchtower: '🗼',
+    wall: '🧱',
+    elevator: '🛗',
+    forge_shrine: '🔨',
+    spore_network: '🌐',
+    crystal_tower: '💎',
+    petrified_wall: '🪨',
+    hive_rift: '🐛'
+  };
+
   $: {
     if (game && layer !== undefined) {
       draw();
@@ -51,10 +73,20 @@
     draw();
 
     window.addEventListener('resize', draw);
+
+    function animate() {
+      animFrame = (animFrame + 1) % 120;
+      draw();
+      animationId = requestAnimationFrame(animate);
+    }
+    animationId = requestAnimationFrame(animate);
   });
 
   onDestroy(() => {
     window.removeEventListener('resize', draw);
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+    }
   });
 
   function draw() {
@@ -100,6 +132,19 @@
       ctx.lineWidth = 2;
       drawHexagon(x, y, hexSize - 2);
       ctx.stroke();
+
+      if (operationMode === 'mine') {
+        const gameLayer2 = game.map?.layers?.[layer];
+        if (gameLayer2) {
+          const key = hexKey(hoveredCell.q, hoveredCell.r);
+          const cell = gameLayer2.cells?.[key];
+          if (cell && canMineCell(cell)) {
+            ctx.fillStyle = 'rgba(243, 156, 18, 0.3)';
+            drawHexagon(x, y, hexSize - 4);
+            ctx.fill();
+          }
+        }
+      }
     }
 
     if (buildMode && hoveredCell) {
@@ -111,6 +156,24 @@
       drawHexagon(x, y, hexSize - 4);
       ctx.fill();
     }
+  }
+
+  function canMineCell(cell) {
+    if (!cell.is_wall) return false;
+    if (cell.mining_owner) return false;
+    
+    const neighbors = getHexNeighbors(cell.coord);
+    const gameLayer = game.map?.layers?.[layer];
+    if (!gameLayer) return false;
+    
+    for (const n of neighbors) {
+      const key = hexKey(n.q, n.r);
+      const nc = gameLayer.cells?.[key];
+      if (nc && nc.owner === playerId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function drawCell(cell, w, h) {
@@ -134,6 +197,14 @@
       ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
       drawHexagon(x, y, hexSize - 4);
       ctx.fill();
+
+      if (cell.mining_owner) {
+        drawMiningProgress(x, y, cell);
+      }
+
+      if (cell.water_content >= 0.5 && isAdjacentToOwned(cell)) {
+        drawWaterDropIcon(x, y);
+      }
     } else {
       ctx.fillStyle = colors.floor;
       drawHexagon(x, y, hexSize - 1);
@@ -152,7 +223,7 @@
         const mColor = mineralColors[cell.mineral_type] || '#fff';
         ctx.fillStyle = mColor;
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.arc(x - 8, y + 8, 4, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -189,6 +260,64 @@
     ctx.stroke();
   }
 
+  function isAdjacentToOwned(cell) {
+    const neighbors = getHexNeighbors(cell.coord);
+    const gameLayer = game.map?.layers?.[layer];
+    if (!gameLayer) return false;
+    
+    for (const n of neighbors) {
+      const key = hexKey(n.q, n.r);
+      const nc = gameLayer.cells?.[key];
+      if (nc && nc.owner === playerId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function drawMiningProgress(x, y, cell) {
+    const player = game.players?.[cell.mining_owner];
+    const color = player?.color || '#f39c12';
+
+    const pulse = Math.sin(animFrame * 0.1) * 0.1 + 0.9;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = pulse;
+    drawHexagon(x, y, hexSize - 3);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    const progress = cell.mining_progress / cell.mining_total;
+    const barWidth = hexSize * 1.2;
+    const barHeight = 4;
+    const barX = x - barWidth / 2;
+    const barY = y + hexSize - 8;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    ctx.fillStyle = color;
+    ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⛏️', x, y - 2);
+  }
+
+  function drawWaterDropIcon(x, y) {
+    const wobble = Math.sin(animFrame * 0.08) * 2;
+    
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    ctx.shadowColor = 'rgba(52, 152, 219, 0.8)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('💧', x + hexSize * 0.6 + wobble, y - hexSize * 0.5);
+    ctx.shadowBlur = 0;
+  }
+
   function drawBuilding(x, y, building) {
     const buildingColors = {
       main_base: '#e94560',
@@ -210,23 +339,49 @@
     };
 
     const color = buildingColors[building.type] || '#ecf0f1';
+    const icon = buildingIcons[building.type] || '🏠';
 
-    ctx.fillStyle = color;
-    ctx.fillRect(x - 10, y - 10, 20, 20);
+    ctx.fillStyle = color + '40';
+    drawHexagon(x, y, hexSize - 6);
+    ctx.fill();
+
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
     if (!building.completed) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      const hammerSpin = animFrame * 0.15;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.sin(hammerSpin) * 0.4);
+      ctx.font = '20px sans-serif';
+      ctx.fillText('🔨', 0, 0);
+      ctx.restore();
+
       const progress = building.progress / building.build_time;
-      ctx.fillRect(x - 10, y - 10, 20 * (1 - progress), 20);
+      const barWidth = hexSize * 1.2;
+      const barHeight = 4;
+      const barX = x - barWidth / 2;
+      const barY = y + 12;
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+
+      ctx.fillStyle = '#2ecc71';
+      ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '8px sans-serif';
+      ctx.fillText(`${Math.round(progress * 100)}%`, x, barY + barHeight + 6);
+    } else {
+      ctx.fillText(icon, x, y);
     }
 
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x - 10, y - 10, 20, 20);
-
     const hpPercent = building.hp / building.max_hp;
-    ctx.fillStyle = hpPercent > 0.5 ? '#2ecc71' : hpPercent > 0.25 ? '#f39c12' : '#e74c3c';
-    ctx.fillRect(x - 10, y + 12, 20 * hpPercent, 3);
+    if (hpPercent < 1) {
+      ctx.fillStyle = hpPercent > 0.5 ? '#2ecc71' : hpPercent > 0.25 ? '#f39c12' : '#e74c3c';
+      ctx.fillRect(x - 12, y - hexSize + 6, 24 * hpPercent, 3);
+    }
   }
 
   function drawUnits(x, y, units) {
@@ -237,19 +392,19 @@
 
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.arc(x + 8, y + 8, 7, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px sans-serif';
+    ctx.font = 'bold 8px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(count > 9 ? '9+' : count, x, y);
+    ctx.fillText(count > 9 ? '9+' : count, x + 8, y + 8);
 
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.arc(x + 8, y + 8, 7, 0, Math.PI * 2);
     ctx.stroke();
   }
 

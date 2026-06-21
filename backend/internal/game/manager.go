@@ -77,7 +77,7 @@ func (gm *GameManager) StartGame(gameID string) bool {
 }
 
 func (gm *GameManager) runGameLoop(gameID string) {
-	ticker := time.NewTicker(90 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -91,10 +91,36 @@ func (gm *GameManager) runGameLoop(gameID string) {
 		gm.mu.Lock()
 		if g, ok := gm.games[gameID]; ok {
 			if g.Phase == PhasePlanning {
-				g.ProcessTurn()
+				shouldProcess := false
 
-				if g.Phase != PhaseEnded {
-					g.PlanningEndsAt = time.Now().Add(90 * time.Second)
+				if time.Now().After(g.PlanningEndsAt) {
+					shouldProcess = true
+				} else {
+					allReady := true
+					hasPlayers := false
+					for _, player := range g.Players {
+						if !player.Eliminated {
+							hasPlayers = true
+							if !player.Ready {
+								allReady = false
+								break
+							}
+						}
+					}
+					if hasPlayers && allReady {
+						shouldProcess = true
+					}
+				}
+
+				if shouldProcess {
+					g.ProcessTurn()
+
+					if g.Phase != PhaseEnded {
+						g.PlanningEndsAt = time.Now().Add(90 * time.Second)
+						for _, player := range g.Players {
+							player.Ready = false
+						}
+					}
 				}
 			}
 		}
@@ -109,6 +135,21 @@ func (gm *GameManager) SubmitAction(gameID, playerID, action string, data map[st
 	game, ok := gm.games[gameID]
 	if !ok || game.Phase != PhasePlanning {
 		return false
+	}
+
+	player, ok := game.Players[playerID]
+	if !ok || player.Eliminated {
+		return false
+	}
+
+	if action == "ready" {
+		player.Ready = true
+		return true
+	}
+
+	if action == "unready" {
+		player.Ready = false
+		return true
 	}
 
 	game.SubmitAction(playerID, action, data)

@@ -316,6 +316,10 @@ func (gs *GameState) processMining() {
 			continue
 		}
 
+		if cell.MiningOwner != "" {
+			continue
+		}
+
 		canMine := false
 		for _, n := range getHexNeighbors(coord) {
 			if nc, ok := GetCell(layer, n); ok && nc.Owner == action.PlayerID {
@@ -327,36 +331,78 @@ func (gs *GameState) processMining() {
 			continue
 		}
 
-		miningSpeed := 1.0
-		raceInfo := RaceDefs[player.Race]
-		if bonus, ok := raceInfo.Bonuses["mining_speed"]; ok {
-			miningSpeed *= bonus
-		}
-
-		collapseChance := cell.WaterContent * 0.1
-		if player.Techs["support_beams"] {
-			collapseChance *= 0.5
-		}
-
-		if rand.Float64() < collapseChance {
-			cell.IsWall = true
-			gs.addEvent(GameEvent{
-				Type:    EventEarthquake,
-				Message: "塌方！挖掘失败，损失了一些资源",
-				Turn:    gs.CurrentTurn,
-				Layer:   layerIdx,
-				Location: coord,
-			})
-			player.Resources.Stone = max(0, player.Resources.Stone-10)
-			continue
-		}
-
-		cell.IsWall = false
-		cell.Owner = action.PlayerID
-		cell.Discovered = true
-
-		gs.revealArea(player, layerIdx, coord, 2)
+		cell.MiningOwner = action.PlayerID
+		cell.MiningProgress = 0
+		cell.MiningTotal = cell.RockHardness * 2
 	}
+
+	for layerIdx, layer := range gs.Map.Layers {
+		for _, cell := range layer.Cells {
+			if cell.MiningOwner == "" || !cell.IsWall {
+				continue
+			}
+
+			player := gs.Players[cell.MiningOwner]
+			if player == nil || player.Eliminated {
+				cell.MiningOwner = ""
+				cell.MiningProgress = 0
+				cell.MiningTotal = 0
+				continue
+			}
+
+			miningSpeed := 1.0
+			raceInfo := RaceDefs[player.Race]
+			if bonus, ok := raceInfo.Bonuses["mining_speed"]; ok {
+				miningSpeed *= bonus
+			}
+
+			if player.Techs["basic_mining"] {
+				miningSpeed *= 1.2
+			}
+			if player.Techs["advanced_mining"] {
+				miningSpeed *= 1.3
+			}
+
+			cell.MiningProgress += int(miningSpeed)
+			if cell.MiningProgress >= cell.MiningTotal {
+				collapseChance := cell.WaterContent * 0.1
+				if player.Techs["support_beams"] {
+					collapseChance *= 0.5
+				}
+
+				if rand.Float64() < collapseChance {
+					cell.MiningOwner = ""
+					cell.MiningProgress = 0
+					cell.MiningTotal = 0
+					gs.addEvent(GameEvent{
+						Type:     EventEarthquake,
+						Message:  "塌方！挖掘失败，损失了一些资源",
+						Turn:     gs.CurrentTurn,
+						Layer:    layerIdx,
+						Location: cell.Coord,
+					})
+					player.Resources.Stone = max(0, player.Resources.Stone-10)
+					continue
+				}
+
+				cell.IsWall = false
+				cell.Owner = cell.MiningOwner
+				cell.Discovered = true
+				cell.MiningOwner = ""
+				cell.MiningProgress = 0
+				cell.MiningTotal = 0
+
+				gs.revealArea(player, layerIdx, cell.Coord, 2)
+			}
+		}
+	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (gs *GameState) processBuilding() {

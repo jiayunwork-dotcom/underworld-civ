@@ -6,19 +6,22 @@ type HexCoord struct {
 }
 
 type HexCell struct {
-	Coord        HexCoord `json:"coord"`
-	Layer        int      `json:"layer"`
-	Discovered   bool     `json:"discovered"`
-	Owner        string   `json:"owner"`
-	RockHardness int      `json:"rock_hardness"`
-	WaterContent float64  `json:"water_content"`
-	MineralType  string   `json:"mineral_type"`
-	IsWall       bool     `json:"is_wall"`
-	IsShaft      bool     `json:"is_shaft"`
-	Building     *Building `json:"building"`
-	Units        []Unit   `json:"units"`
-	DefenseBonus float64  `json:"defense_bonus"`
-	Flooded      bool     `json:"flooded"`
+	Coord         HexCoord `json:"coord"`
+	Layer         int      `json:"layer"`
+	Discovered    bool     `json:"discovered"`
+	Owner         string   `json:"owner"`
+	RockHardness  int      `json:"rock_hardness"`
+	WaterContent  float64  `json:"water_content"`
+	MineralType   string   `json:"mineral_type"`
+	IsWall        bool     `json:"is_wall"`
+	IsShaft       bool     `json:"is_shaft"`
+	Building      *Building `json:"building"`
+	Units         []Unit   `json:"units"`
+	DefenseBonus  float64  `json:"defense_bonus"`
+	Flooded       bool     `json:"flooded"`
+	MiningOwner   string   `json:"mining_owner"`
+	MiningProgress int     `json:"mining_progress"`
+	MiningTotal   int      `json:"mining_total"`
 }
 
 type Layer struct {
