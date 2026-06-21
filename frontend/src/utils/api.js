@@ -94,6 +94,31 @@ export const api = {
         tech_id: techId
       })
     });
+  },
+
+  async blockadeTech(gameId, playerId, targetId, category) {
+    return request(`${API_BASE}/games/${gameId}/tech-blockade`, {
+      method: 'POST',
+      body: JSON.stringify({
+        player_id: playerId,
+        target_id: targetId,
+        category: category
+      })
+    });
+  },
+
+  async dispatchSpy(gameId, playerId, unitId, targetId) {
+    return request(`${API_BASE}/games/${gameId}/actions`, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'dispatch_spy',
+        data: {
+          unit_id: unitId,
+          target_id: targetId
+        },
+        player_id: playerId
+      })
+    });
   }
 };
 

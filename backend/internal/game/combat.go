@@ -55,6 +55,12 @@ func (gs *GameState) processCombat() {
 		attackBonus += player.GetTechEffect("all_stats")
 		attackFlatBonus += player.GetTechEffect("attack_flat")
 
+		if player.TechSynergies != nil {
+			if syn, ok := player.TechSynergies[TechMilitary]; ok {
+				attackFlatBonus += float64(syn.AttackBonus)
+			}
+		}
+
 		siegeBonus := player.GetTechEffect("siege_damage")
 		if unit.Type == UnitSiegeRam {
 			attackBonus += siegeBonus
@@ -62,8 +68,14 @@ func (gs *GameState) processCombat() {
 
 		attackPower = (attackPower + attackFlatBonus) * attackBonus
 
-		hpPctBonus := player.GetTechEffect("hp_pct")
-		unitMaxHP := float64(unit.MaxHP) * (1 + hpPctBonus + player.GetTechEffect("all_stats"))
+		attackerHPPctBonus := player.GetTechEffect("hp_pct")
+		attackerHPSynBonus := 0.0
+		if player.TechSynergies != nil {
+			if syn, ok := player.TechSynergies[TechSpecial]; ok {
+				attackerHPSynBonus = syn.HPBonus
+			}
+		}
+		attackerMaxHP := float64(unit.MaxHP) * (1 + attackerHPPctBonus + player.GetTechEffect("all_stats") + attackerHPSynBonus)
 
 		defenderPlayerID := ""
 		if len(targetCell.Units) > 0 {
@@ -80,6 +92,19 @@ func (gs *GameState) processCombat() {
 		if len(targetCell.Units) > 0 {
 			defenderUnit := &targetCell.Units[0]
 			defender := gs.Players[defenderUnit.Owner]
+
+			defenderHPPctBonus := 0.0
+			defenderHPSynBonus := 0.0
+			defenderMaxHP := float64(defenderUnit.MaxHP)
+			if defender != nil {
+				defenderHPPctBonus = defender.GetTechEffect("hp_pct")
+				if defender.TechSynergies != nil {
+					if syn, ok := defender.TechSynergies[TechSpecial]; ok {
+						defenderHPSynBonus = syn.HPBonus
+					}
+				}
+				defenderMaxHP = float64(defenderUnit.MaxHP) * (1 + defenderHPPctBonus + defender.GetTechEffect("all_stats") + defenderHPSynBonus)
+			}
 
 			defensePower := float64(defenderUnit.Defense)
 			defenseBonus := 1.0
@@ -104,9 +129,11 @@ func (gs *GameState) processCombat() {
 			damage := math.Max(1, attackPower-defensePower/2)
 			damage = damage * (0.8 + rand.Float64()*0.4)
 
-			_ = unitMaxHP
-
 			defenderUnit.HP -= int(damage)
+			defenderEffectiveMaxHP := int(defenderMaxHP)
+			if defenderUnit.HP > defenderEffectiveMaxHP {
+				defenderUnit.HP = defenderEffectiveMaxHP
+			}
 
 			gs.updateUnitInPlayerList(defenderUnit)
 
@@ -120,6 +147,11 @@ func (gs *GameState) processCombat() {
 				if defender != nil {
 					counterAttackFlat := defender.GetTechEffect("attack_flat")
 					counterAttackPct := 1 + defender.GetTechEffect("attack_pct") + defender.GetTechEffect("all_stats")
+					if defender.TechSynergies != nil {
+						if syn, ok := defender.TechSynergies[TechMilitary]; ok {
+							counterAttackFlat += float64(syn.AttackBonus)
+						}
+					}
 					counterAttack = (counterAttack + counterAttackFlat) * counterAttackPct
 				}
 				unitDefense := float64(unit.Defense)
@@ -132,6 +164,10 @@ func (gs *GameState) processCombat() {
 				counterDamage := math.Max(1, counterAttack-unitDefense/2)
 
 				unit.HP -= int(counterDamage)
+				attackerEffectiveMaxHP := int(attackerMaxHP)
+				if unit.HP > attackerEffectiveMaxHP {
+					unit.HP = attackerEffectiveMaxHP
+				}
 				gs.updateUnitInPlayerList(unit)
 
 				if unit.HP <= 0 {

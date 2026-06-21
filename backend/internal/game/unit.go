@@ -3,31 +3,35 @@ package game
 type UnitType string
 
 const (
-	UnitSapper       UnitType = "sapper"
-	UnitInfantry     UnitType = "infantry"
-	UnitArcher       UnitType = "archer"
-	UnitSiegeRam     UnitType = "siege_ram"
-	UnitIronGuard    UnitType = "iron_guard"
+	UnitSapper        UnitType = "sapper"
+	UnitInfantry      UnitType = "infantry"
+	UnitArcher        UnitType = "archer"
+	UnitSiegeRam      UnitType = "siege_ram"
+	UnitIronGuard     UnitType = "iron_guard"
 	UnitSporeGrenadier UnitType = "spore_grenadier"
-	UnitShadowArcher   UnitType = "shadow_archer"
-	UnitRockGiant    UnitType = "rock_giant"
-	UnitBurrowBomber UnitType = "burrow_bomber"
+	UnitShadowArcher  UnitType = "shadow_archer"
+	UnitRockGiant     UnitType = "rock_giant"
+	UnitBurrowBomber  UnitType = "burrow_bomber"
+	UnitShadowScholar UnitType = "shadow_scholar"
 )
 
 type Unit struct {
-	ID        string   `json:"id"`
-	Type      UnitType `json:"type"`
-	Owner     string   `json:"owner"`
-	HP        int      `json:"hp"`
-	MaxHP     int      `json:"max_hp"`
-	Attack    int      `json:"attack"`
-	Defense   int      `json:"defense"`
-	Range     int      `json:"range"`
-	Speed     int      `json:"speed"`
-	Moved     bool     `json:"moved"`
-	Attacked  bool     `json:"attacked"`
-	Layer     int      `json:"layer"`
-	Coord     HexCoord `json:"coord"`
+	ID             string    `json:"id"`
+	Type           UnitType  `json:"type"`
+	Owner          string    `json:"owner"`
+	HP             int       `json:"hp"`
+	MaxHP          int       `json:"max_hp"`
+	Attack         int       `json:"attack"`
+	Defense        int       `json:"defense"`
+	Range          int       `json:"range"`
+	Speed          int       `json:"speed"`
+	Moved          bool      `json:"moved"`
+	Attacked       bool      `json:"attacked"`
+	Layer          int       `json:"layer"`
+	Coord          HexCoord  `json:"coord"`
+	SpyTarget      string    `json:"spy_target,omitempty"`
+	SpyLurkingTurns int      `json:"spy_lurking_turns,omitempty"`
+	SpyStatus      SpyStatus `json:"spy_status,omitempty"`
 }
 
 type UnitInfo struct {
@@ -147,5 +151,16 @@ var UnitDefs = map[UnitType]UnitInfo{
 		Speed:        3,
 		Description:  "深渊虫族独有，自爆单位，可钻地",
 		RaceSpecific: "zerg",
+	},
+	UnitShadowScholar: {
+		Type:        UnitShadowScholar,
+		Name:        "暗影学者",
+		Cost:        Resources{MagicCrystal: 50, Metal: 30},
+		HP:          25,
+		Attack:      3,
+		Defense:     2,
+		Range:       1,
+		Speed:       3,
+		Description: "间谍单位，可派遣至对手领地潜伏窃取科技",
 	},
 }

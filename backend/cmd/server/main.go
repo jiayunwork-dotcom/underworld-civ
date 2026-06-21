@@ -67,6 +67,7 @@ func main() {
 	api.Get("/techs", handlers.GetTechs)
 	api.Get("/games/:id/tech-tree", handlers.GetTechTree)
 	api.Post("/games/:id/tech-tree", handlers.SetResearch)
+	api.Post("/games/:id/tech-blockade", handlers.BlockadeTech)
 
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {

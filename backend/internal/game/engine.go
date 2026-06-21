@@ -28,28 +28,32 @@ func NewGameState(name string, maxPlayers int, seed int64) *GameState {
 
 func (gs *GameState) AddPlayer(playerID, username string, race Race, color string, isHost bool) {
 	player := &PlayerState{
-		PlayerID:        playerID,
-		Username:        username,
-		Race:            race,
-		Color:           color,
-		IsHost:          isHost,
-		Resources:       ResourceStorage{Resources: Resources{Stone: 100, Metal: 50, GlowMushroom: 80, Water: 60, MagicCrystal: 10, FossilFuel: 20}, Capacity: 500},
-		Production:      ResourceProduction{},
-		Population:      10,
-		PopulationCap:   20,
-		ResearchPoints:  0,
-		Techs:           make(map[string]bool),
-		TechProgresses:  make(map[string]int),
-		ResearchQueue:   make([]string, 0),
-		CurrentResearch: "",
+		PlayerID:         playerID,
+		Username:         username,
+		Race:             race,
+		Color:            color,
+		IsHost:           isHost,
+		Resources:        ResourceStorage{Resources: Resources{Stone: 100, Metal: 50, GlowMushroom: 80, Water: 60, MagicCrystal: 10, FossilFuel: 20}, Capacity: 500},
+		Production:       ResourceProduction{},
+		Population:       10,
+		PopulationCap:    20,
+		ResearchPoints:   0,
+		KnowledgeReserve: 0,
+		Techs:            make(map[string]bool),
+		TechProgresses:   make(map[string]int),
+		ResearchQueue:    make([]string, 0),
+		CurrentResearch:  "",
 		ResearchProgress: 0,
-		Units:           make([]Unit, 0),
-		Buildings:       make(map[string]*Building),
-		VisionRange:     3,
-		Diplomacy:       make(map[string]*DiplomaticRelation),
-		TradeOffers:     make([]TradeOffer, 0),
-		Embargoes:       make([]Embargo, 0),
-		Ready:           false,
+		TechSynergies:    make(map[TechCategory]*TechSynergy),
+		Units:            make([]Unit, 0),
+		Buildings:        make(map[string]*Building),
+		VisionRange:      3,
+		Diplomacy:        make(map[string]*DiplomaticRelation),
+		TradeOffers:      make([]TradeOffer, 0),
+		Embargoes:        make([]Embargo, 0),
+		IncomingBlockades: make([]TechBlockade, 0),
+		OutgoingBlockades: make([]TechBlockade, 0),
+		Ready:            false,
 	}
 
 	raceInfo := RaceDefs[race]
@@ -203,12 +207,19 @@ func (gs *GameState) calculateProduction(player *PlayerState) {
 	allBonus := player.GetTechEffect("all_production")
 	allStatsBonus := player.GetTechEffect("all_stats")
 
-	prod.Stone = int(float64(prod.Stone) * (1 + stoneBonus + allBonus + allStatsBonus))
-	prod.Metal = int(float64(prod.Metal) * (1 + metalBonus + allBonus + allStatsBonus))
-	prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + fungusBonus + allBonus + allStatsBonus))
-	prod.Water = int(float64(prod.Water) * (1 + waterBonus + allBonus + allStatsBonus))
-	prod.MagicCrystal = int(float64(prod.MagicCrystal) * (1 + crystalBonus + allBonus + allStatsBonus))
-	prod.FossilFuel = int(float64(prod.FossilFuel) * (1 + fossilBonus + allBonus + allStatsBonus))
+	miningSynergyBonus := 0.0
+	if player.TechSynergies != nil {
+		if syn, ok := player.TechSynergies[TechMining]; ok {
+			miningSynergyBonus = syn.ResourceBonus
+		}
+	}
+
+	prod.Stone = int(float64(prod.Stone) * (1 + stoneBonus + allBonus + allStatsBonus + miningSynergyBonus))
+	prod.Metal = int(float64(prod.Metal) * (1 + metalBonus + allBonus + allStatsBonus + miningSynergyBonus))
+	prod.GlowMushroom = int(float64(prod.GlowMushroom) * (1 + fungusBonus + allBonus + allStatsBonus + miningSynergyBonus))
+	prod.Water = int(float64(prod.Water) * (1 + waterBonus + allBonus + allStatsBonus + miningSynergyBonus))
+	prod.MagicCrystal = int(float64(prod.MagicCrystal) * (1 + crystalBonus + allBonus + allStatsBonus + miningSynergyBonus))
+	prod.FossilFuel = int(float64(prod.FossilFuel) * (1 + fossilBonus + allBonus + allStatsBonus + miningSynergyBonus))
 
 	storageCapBonus := player.GetTechEffect("storage_cap")
 	player.Resources.Capacity = int(float64(500) * (1 + storageCapBonus))
@@ -238,6 +249,8 @@ func (gs *GameState) ProcessTurn() {
 	gs.processMining()
 	gs.processBuilding()
 	gs.processProduction()
+	gs.processBlockades()
+	gs.processSpies()
 	gs.processResearch()
 	gs.processUnitMovement()
 	gs.processCombat()
@@ -286,6 +299,12 @@ func (gs *GameState) calculateResearchPoints(player *PlayerState) int {
 	}
 
 	points += int(player.GetTechEffect("research_point"))
+
+	if player.TechSynergies != nil {
+		if syn, ok := player.TechSynergies[TechEconomy]; ok {
+			points += syn.ResearchBonus
+		}
+	}
 
 	if points < 1 {
 		points = 1
@@ -593,6 +612,13 @@ func (gs *GameState) processResearch() {
 					player.ResearchQueue = player.ResearchQueue[1:]
 					if CheckPrerequisites(nextTech, player.Techs) && !player.Techs[nextTech] {
 						player.CurrentResearch = nextTech
+						if player.KnowledgeReserve > 0 {
+							if player.TechProgresses == nil {
+								player.TechProgresses = make(map[string]int)
+							}
+							player.TechProgresses[player.CurrentResearch] = player.KnowledgeReserve
+							player.KnowledgeReserve = 0
+						}
 						break
 					}
 				}
@@ -616,6 +642,13 @@ func (gs *GameState) processResearch() {
 		researchSpeed := 1.0
 		researchSpeed += player.GetTechEffect("research_speed")
 
+		for _, blockade := range player.IncomingBlockades {
+			if blockade.Category == tech.Category && blockade.TurnsRemaining > 0 {
+				researchSpeed *= 0.5
+				break
+			}
+		}
+
 		if player.TechProgresses == nil {
 			player.TechProgresses = make(map[string]int)
 		}
@@ -627,11 +660,14 @@ func (gs *GameState) processResearch() {
 		player.TechProgresses[player.CurrentResearch] = player.ResearchProgress
 
 		if player.ResearchProgress >= tech.Cost {
+			overflow := player.ResearchProgress - tech.Cost
 			player.Techs[player.CurrentResearch] = true
 			player.TechProgresses[player.CurrentResearch] = tech.Cost
 			player.ResearchProgress = 0
 			completedTechID := player.CurrentResearch
 			player.CurrentResearch = ""
+
+			player.TechSynergies = CalculateSynergies(player.Techs)
 
 			gs.addEvent(GameEvent{
 				Type:     EventRandomGood,
@@ -640,12 +676,41 @@ func (gs *GameState) processResearch() {
 				Location: HexCoord{},
 			})
 
-			if len(player.ResearchQueue) > 0 {
+			movedToNext := false
+			if overflow > 0 {
+				if len(player.ResearchQueue) > 0 {
+					for len(player.ResearchQueue) > 0 {
+						nextTech := player.ResearchQueue[0]
+						player.ResearchQueue = player.ResearchQueue[1:]
+						if CheckPrerequisites(nextTech, player.Techs) && !player.Techs[nextTech] {
+							player.CurrentResearch = nextTech
+							if player.TechProgresses == nil {
+								player.TechProgresses = make(map[string]int)
+							}
+							player.TechProgresses[player.CurrentResearch] = overflow
+							movedToNext = true
+							break
+						}
+					}
+				}
+				if !movedToNext {
+					player.KnowledgeReserve += int(float64(overflow) * 0.5)
+				}
+			}
+
+			if !movedToNext && len(player.ResearchQueue) > 0 {
 				for len(player.ResearchQueue) > 0 {
 					nextTech := player.ResearchQueue[0]
 					player.ResearchQueue = player.ResearchQueue[1:]
 					if CheckPrerequisites(nextTech, player.Techs) && !player.Techs[nextTech] {
 						player.CurrentResearch = nextTech
+						if player.KnowledgeReserve > 0 {
+							if player.TechProgresses == nil {
+								player.TechProgresses = make(map[string]int)
+							}
+							player.TechProgresses[player.CurrentResearch] = player.KnowledgeReserve
+							player.KnowledgeReserve = 0
+						}
 						break
 					}
 				}
@@ -681,6 +746,209 @@ func (gs *GameState) SetCurrentResearch(playerID, techID string) (bool, string) 
 	}
 
 	player.CurrentResearch = techID
+	return true, ""
+}
+
+func (gs *GameState) processBlockades() {
+	for _, player := range gs.Players {
+		if player.Eliminated {
+			continue
+		}
+
+		activeIncoming := make([]TechBlockade, 0)
+		for _, blockade := range player.IncomingBlockades {
+			blockade.TurnsRemaining--
+			if blockade.TurnsRemaining > 0 {
+				activeIncoming = append(activeIncoming, blockade)
+			}
+		}
+		player.IncomingBlockades = activeIncoming
+
+		activeOutgoing := make([]TechBlockade, 0)
+		for _, blockade := range player.OutgoingBlockades {
+			blockade.TurnsRemaining--
+			if blockade.TurnsRemaining > 0 {
+				activeOutgoing = append(activeOutgoing, blockade)
+			}
+		}
+		player.OutgoingBlockades = activeOutgoing
+	}
+}
+
+func (gs *GameState) BlockadeTech(issuerID, targetID string, category TechCategory) (bool, string) {
+	issuer, ok := gs.Players[issuerID]
+	if !ok || issuer.Eliminated {
+		return false, "发起者不存在或已被淘汰"
+	}
+
+	target, ok := gs.Players[targetID]
+	if !ok || target.Eliminated {
+		return false, "目标不存在或已被淘汰"
+	}
+
+	if issuerID == targetID {
+		return false, "不能对自己发动封锁"
+	}
+
+	categoryTechs := GetTechsByCategory(category)
+	hasTier7 := false
+	for _, tech := range categoryTechs {
+		if tech.Tier == 7 && issuer.Techs[tech.ID] {
+			hasTier7 = true
+			break
+		}
+	}
+	if !hasTier7 {
+		return false, "需要完成该路线第7项科技才能发动封锁"
+	}
+
+	for _, blockade := range issuer.OutgoingBlockades {
+		if blockade.TargetPlayerID == targetID && blockade.Category == category {
+			return false, "已对该对手在此路线上施加了封锁"
+		}
+	}
+
+	if issuer.Resources.MagicCrystal < 20 {
+		return false, "魔晶不足，需要20魔晶"
+	}
+
+	issuer.Resources.MagicCrystal -= 20
+
+	blockade := TechBlockade{
+		TargetPlayerID: targetID,
+		Category:       category,
+		TurnsRemaining: 5,
+		IssuerPlayerID: issuerID,
+	}
+
+	issuer.OutgoingBlockades = append(issuer.OutgoingBlockades, blockade)
+	target.IncomingBlockades = append(target.IncomingBlockades, blockade)
+
+	gs.addEvent(GameEvent{
+		Type:     EventRandomGood,
+		Message:  "成功对" + target.Username + "发动了" + string(category) + "路线科技封锁！",
+		Turn:     gs.CurrentTurn,
+		Location: HexCoord{},
+	})
+
+	return true, ""
+}
+
+func (gs *GameState) processSpies() {
+	for _, player := range gs.Players {
+		if player.Eliminated {
+			continue
+		}
+
+		for i := range player.Units {
+			unit := &player.Units[i]
+			if unit.Type != UnitShadowScholar || unit.SpyStatus != SpyStatusLurking {
+				continue
+			}
+
+			unit.SpyLurkingTurns++
+
+			if unit.SpyLurkingTurns >= 3 {
+				targetPlayer, ok := gs.Players[unit.SpyTarget]
+				if !ok || targetPlayer.Eliminated {
+					unit.SpyStatus = SpyStatusCaught
+					continue
+				}
+
+				if targetPlayer.CurrentResearch == "" {
+					unit.SpyStatus = SpyStatusCaught
+					gs.addEvent(GameEvent{
+						Type:     EventEarthquake,
+						Message:  "你的暗影学者在" + targetPlayer.Username + "的领地被发现并处决！",
+						Turn:     gs.CurrentTurn,
+						Location: unit.Coord,
+					})
+					continue
+				}
+
+				if rand.Float64() < 0.4 {
+					tech := GetTechByID(targetPlayer.CurrentResearch)
+					if tech != nil {
+						stolenProgress := int(float64(tech.Cost) * 0.25)
+						if player.TechProgresses == nil {
+							player.TechProgresses = make(map[string]int)
+						}
+						player.TechProgresses[targetPlayer.CurrentResearch] += stolenProgress
+
+						unit.SpyStatus = SpyStatusSuccessful
+
+						gs.addEvent(GameEvent{
+							Type:     EventRandomGood,
+							Message:  "暗影学者成功窃取了" + targetPlayer.Username + "的科技：" + tech.Name + "！",
+							Turn:     gs.CurrentTurn,
+							Location: unit.Coord,
+						})
+
+						gs.addEvent(GameEvent{
+							Type:     EventEarthquake,
+							Message:  "你的研究遭到间谍窃取！",
+							Turn:     gs.CurrentTurn,
+							Location: HexCoord{},
+						})
+					}
+				} else {
+					unit.SpyStatus = SpyStatusCaught
+					gs.addEvent(GameEvent{
+						Type:     EventEarthquake,
+						Message:  "你的暗影学者在" + targetPlayer.Username + "的领地被发现并处决！",
+						Turn:     gs.CurrentTurn,
+						Location: unit.Coord,
+					})
+				}
+			}
+		}
+
+		player.Units = removeCompletedSpies(player.Units)
+	}
+}
+
+func removeCompletedSpies(units []Unit) []Unit {
+	result := make([]Unit, 0, len(units))
+	for _, unit := range units {
+		if unit.Type == UnitShadowScholar &&
+			(unit.SpyStatus == SpyStatusSuccessful || unit.SpyStatus == SpyStatusCaught) {
+			continue
+		}
+		result = append(result, unit)
+	}
+	return result
+}
+
+func (gs *GameState) DispatchSpy(playerID, unitID, targetPlayerID string) (bool, string) {
+	player, ok := gs.Players[playerID]
+	if !ok || player.Eliminated {
+		return false, "玩家不存在或已被淘汰"
+	}
+
+	target, ok := gs.Players[targetPlayerID]
+	if !ok || target.Eliminated {
+		return false, "目标玩家不存在或已被淘汰"
+	}
+
+	if playerID == targetPlayerID {
+		return false, "不能派遣间谍到自己领地"
+	}
+
+	unit := gs.findUnit(unitID)
+	if unit == nil || unit.Owner != playerID || unit.Type != UnitShadowScholar {
+		return false, "暗影学者不存在"
+	}
+
+	if unit.SpyStatus == SpyStatusLurking {
+		return false, "该间谍已在执行任务"
+	}
+
+	unit.SpyTarget = targetPlayerID
+	unit.SpyLurkingTurns = 0
+	unit.SpyStatus = SpyStatusLurking
+
+	gs.updateUnitInPlayerList(unit)
+
 	return true, ""
 }
 

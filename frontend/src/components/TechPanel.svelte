@@ -10,12 +10,28 @@
   let hoveredTech = null;
   let hoverPosition = { x: 0, y: 0 };
   let isSettingResearch = false;
+  let hoveredSynergy = null;
+  let synergyHoverPosition = { x: 0, y: 0 };
+  let showBlockadeModal = false;
+  let blockadeCategory = null;
+  let knowledgeReserve = 0;
+  let techSynergies = {};
+  let incomingBlockades = [];
+  let outgoingBlockades = [];
+  let opponentPlayers = [];
 
   const categoryInfo = {
     military: { name: '军事线', icon: '⚔️', color: '#e74c3c' },
     economy:  { name: '经济线', icon: '💰', color: '#f39c12' },
     mining:   { name: '挖掘线', icon: '⛏️', color: '#3498db' },
     special:  { name: '特殊线', icon: '✨', color: '#9b59b6' }
+  };
+
+  const synergyDescriptions = {
+    military: '每连续3项：全军攻击力+3',
+    economy: '每连续3项：研究点数+1/回合',
+    mining: '每连续3项：资源产出+5%',
+    special: '每连续3项：单位生命值+2%'
   };
 
   const categories = ['military', 'economy', 'mining', 'special'];
@@ -25,16 +41,35 @@
 
   onMount(async () => {
     if (gameId && $playerID) {
-      try {
-        const res = await api.getTechTree(gameId, $playerID);
-        if (res?.my_tech_tree) {
-          techTree = res.my_tech_tree;
-        }
-      } catch (e) {
-        console.error('Failed to load tech tree:', e);
-      }
+      await loadTechTree();
     }
   });
+
+  async function loadTechTree() {
+    try {
+      const res = await api.getTechTree(gameId, $playerID);
+      if (res?.my_tech_tree) {
+        techTree = res.my_tech_tree;
+      }
+      if (res?.tech_synergies) {
+        techSynergies = res.tech_synergies;
+      }
+      if (res?.knowledge_reserve !== undefined) {
+        knowledgeReserve = res.knowledge_reserve;
+      }
+      if (res?.incoming_blockades) {
+        incomingBlockades = res.incoming_blockades;
+      }
+      if (res?.outgoing_blockades) {
+        outgoingBlockades = res.outgoing_blockades;
+      }
+      if (res?.opponent_players) {
+        opponentPlayers = res.opponent_players;
+      }
+    } catch (e) {
+      console.error('Failed to load tech tree:', e);
+    }
+  }
 
   $: {
     if (game && currentPlayer && techTree.length > 0) {
@@ -94,17 +129,27 @@
     hoveredTech = null;
   }
 
+  function showSynergyTooltip(cat, event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const panel = event.currentTarget.closest('.tech-panel');
+    const panelRect = panel?.getBoundingClientRect();
+    hoveredSynergy = cat;
+    synergyHoverPosition = {
+      x: rect.left - (panelRect?.left || 0) + rect.width / 2,
+      y: rect.top - (panelRect?.top || 0) - 8
+    };
+  }
+
+  function hideSynergyTooltip() {
+    hoveredSynergy = null;
+  }
+
   async function handleTechClick(tech) {
     if (!tech.can_research || tech.researched || isSettingResearch) return;
     isSettingResearch = true;
     try {
       await api.setResearch(gameId, $playerID, tech.id);
-      try {
-        const res = await api.getTechTree(gameId, $playerID);
-        if (res?.my_tech_tree) {
-          techTree = res.my_tech_tree;
-        }
-      } catch (e) {}
+      await loadTechTree();
     } catch (e) {
       alert('切换研究目标失败: ' + (e.message || '未知错误'));
     } finally {
@@ -129,6 +174,64 @@
     }).join(', ');
   }
 
+  function getSynergyCount(cat) {
+    return techSynergies[cat]?.triggered || 0;
+  }
+
+  function getSynergyDescription(cat) {
+    const syn = techSynergies[cat];
+    if (!syn || syn.triggered === 0) return synergyDescriptions[cat];
+    let desc = `已触发 ${syn.triggered} 次协同：\n`;
+    if (syn.attack_bonus > 0) {
+      desc += `⚔️ 全军攻击力+${syn.attack_bonus}\n`;
+    }
+    if (syn.research_bonus > 0) {
+      desc += `🔬 研究点数+${syn.research_bonus}/回合\n`;
+    }
+    if (syn.resource_bonus > 0) {
+      desc += `⛏️ 资源产出+${Math.round(syn.resource_bonus * 100)}%\n`;
+    }
+    if (syn.hp_bonus > 0) {
+      desc += `❤️ 单位生命值+${Math.round(syn.hp_bonus * 100)}%\n`;
+    }
+    return desc.trim();
+  }
+
+  function hasTier7Tech(cat) {
+    const techs = getTechsByCategory(cat);
+    return techs.some(t => t.tier === 7 && t.researched);
+  }
+
+  function getBlockadeForCategory(cat) {
+    return incomingBlockades.find(b => b.category === cat && b.turns_remaining > 0);
+  }
+
+  function hasActiveBlockade(cat, targetId) {
+    return outgoingBlockades.some(b => 
+      b.category === cat && 
+      b.target_player_id === targetId && 
+      b.turns_remaining > 0
+    );
+  }
+
+  function openBlockadeModal(cat) {
+    if (!hasTier7Tech(cat)) return;
+    blockadeCategory = cat;
+    showBlockadeModal = true;
+  }
+
+  async function executeBlockade(targetId) {
+    if (!blockadeCategory || !targetId) return;
+    try {
+      await api.blockadeTech(gameId, $playerID, targetId, blockadeCategory);
+      showBlockadeModal = false;
+      blockadeCategory = null;
+      await loadTechTree();
+    } catch (e) {
+      alert('发动封锁失败: ' + (e.message || '未知错误'));
+    }
+  }
+
   $: totalCount = techTree.length;
   $: researchedCount = techTree.filter(t => t.researched).length;
   $: curProgress = getCurrentProgress();
@@ -137,11 +240,18 @@
 <div class="tech-panel">
   <div class="panel-header">
     <h3>🔬 科技研究中心</h3>
-    <div class="overall-progress">
-      <div class="op-bar">
-        <div class="op-fill" style="width: {totalCount ? (researchedCount / totalCount * 100) : 0}%"></div>
+    <div class="header-right">
+      {#if knowledgeReserve > 0}
+        <div class="knowledge-reserve" title="知识储备池：溢出研究点按50%存储，下次研究时一次性注入">
+          📚 知识储备: {knowledgeReserve} 点
+        </div>
+      {/if}
+      <div class="overall-progress">
+        <div class="op-bar">
+          <div class="op-fill" style="width: {totalCount ? (researchedCount / totalCount * 100) : 0}%"></div>
+        </div>
+        <span class="op-text">{researchedCount}/{totalCount}</span>
       </div>
-      <span class="op-text">{researchedCount}/{totalCount}</span>
     </div>
   </div>
 
@@ -151,6 +261,9 @@
         <span class="crb-label">🔬 研究中:</span>
         <span class="crb-name">{curProgress.name}</span>
         <span class="crb-points">{curProgress.current}/{curProgress.cost} 点</span>
+        {#if knowledgeReserve > 0}
+          <span class="crb-reserve" title="知识储备池将在下次开始新研究时注入">📚 {knowledgeReserve}</span>
+        {/if}
       </div>
       <div class="crb-progress">
         <div class="crb-fill" style="width: {curProgress.progress}%"></div>
@@ -164,11 +277,34 @@
         <div class="column-header" style="border-color: {categoryInfo[cat].color}">
           <span class="ch-icon">{categoryInfo[cat].icon}</span>
           <span class="ch-name">{categoryInfo[cat].name}</span>
+          {#if getSynergyCount(cat) > 0}
+            <span 
+              class="synergy-badge"
+              on:mouseenter={(e) => showSynergyTooltip(cat, e)}
+              on:mouseleave={hideSynergyTooltip}
+            >
+              🔥 {getSynergyCount(cat)}
+            </span>
+          {/if}
+          {#if getBlockadeForCategory(cat)}
+            <span class="blockade-icon" title="该路线被封锁，研究速度降低50%，剩余 {getBlockadeForCategory(cat).turns_remaining} 回合">
+              🔒 {getBlockadeForCategory(cat).turns_remaining}
+            </span>
+          {/if}
+          {#if hasTier7Tech(cat) && currentPlayer?.resources?.magic_crystal >= 20}
+            <button 
+              class="blockade-btn"
+              on:click={() => openBlockadeModal(cat)}
+              title="对对手发动科技封锁（消耗20魔晶）"
+            >
+              🚫
+            </button>
+          {/if}
         </div>
         <div class="tech-nodes">
           {#each getTechsByCategory(cat) as tech, idx}
             <div
-              class="tech-node {getStatusClass(tech)}"
+              class="tech-node {getStatusClass(tech)} {getBlockadeForCategory(cat) ? 'blockaded' : ''}"
               style="--cat-color: {categoryInfo[cat].color}"
               on:mouseenter={(e) => showTooltip(tech, e)}
               on:mouseleave={hideTooltip}
@@ -243,6 +379,61 @@
       </div>
     </div>
   {/if}
+
+  {#if hoveredSynergy}
+    <div
+      class="synergy-tooltip"
+      style="left: {synergyHoverPosition.x}px; top: {synergyHoverPosition.y}px;"
+    >
+      <div class="st-header">🔥 科技协同加成</div>
+      <div class="st-content">
+        <pre>{getSynergyDescription(hoveredSynergy)}</pre>
+      </div>
+    </div>
+  {/if}
+
+  {#if showBlockadeModal}
+    <div class="modal-overlay" on:click={() => showBlockadeModal = false}>
+      <div class="modal-content" on:click|stopPropagation>
+        <h3>🚫 发动科技封锁</h3>
+        <p class="modal-desc">
+          对 <strong>{categoryInfo[blockadeCategory]?.name}</strong> 路线发动封锁，
+          使目标对手在接下来5回合内该路线研究速度降低50%。
+          <br>
+          <span class="cost-hint">消耗: 💎 20 魔晶</span>
+        </p>
+        <div class="target-list">
+          {#each opponentPlayers as opponent}
+            {#if !hasActiveBlockade(blockadeCategory, opponent.player_id)}
+              <button 
+                class="target-btn"
+                on:click={() => executeBlockade(opponent.player_id)}
+              >
+                <span class="target-color" style="background: {opponent.color}"></span>
+                <span class="target-name">{opponent.username}</span>
+                <span class="target-race">({opponent.race})</span>
+              </button>
+            {:else}
+              <button 
+                class="target-btn disabled"
+                disabled
+                title="已对该对手在此路线上施加了封锁"
+              >
+                <span class="target-color" style="background: {opponent.color}"></span>
+                <span class="target-name">{opponent.username}</span>
+                <span class="target-race">({opponent.race})</span>
+                <span class="blocked-tag">🔒 已封锁</span>
+              </button>
+            {/if}
+          {/each}
+          {#if opponentPlayers.length === 0}
+            <p class="no-targets">没有可封锁的对手</p>
+          {/if}
+        </div>
+        <button class="close-btn" on:click={() => showBlockadeModal = false}>取消</button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -269,6 +460,22 @@
     margin: 0;
     font-size: 1rem;
     color: #ecf0f1;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .knowledge-reserve {
+    background: rgba(155, 89, 182, 0.2);
+    border: 1px solid rgba(155, 89, 182, 0.5);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: #bb8fce;
+    font-weight: bold;
   }
 
   .overall-progress {
@@ -331,6 +538,15 @@
     font-size: 0.75rem;
   }
 
+  .crb-reserve {
+    background: rgba(155, 89, 182, 0.3);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #bb8fce;
+    font-size: 0.7rem;
+    font-weight: bold;
+  }
+
   .crb-progress {
     height: 6px;
     background: rgba(0,0,0,0.3);
@@ -373,6 +589,7 @@
     margin-bottom: 8px;
     font-size: 0.75rem;
     font-weight: bold;
+    flex-wrap: wrap;
   }
 
   .ch-icon {
@@ -381,6 +598,48 @@
 
   .ch-name {
     flex: 1;
+  }
+
+  .synergy-badge {
+    background: linear-gradient(135deg, #e67e22, #d35400);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 0.65rem;
+    font-weight: bold;
+    cursor: help;
+    animation: synergyPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes synergyPulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(230, 126, 34, 0); }
+    50% { box-shadow: 0 0 8px rgba(230, 126, 34, 0.6); }
+  }
+
+  .blockade-icon {
+    background: rgba(231, 76, 60, 0.3);
+    color: #e74c3c;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: bold;
+    cursor: help;
+  }
+
+  .blockade-btn {
+    background: rgba(231, 76, 60, 0.2);
+    border: 1px solid rgba(231, 76, 60, 0.5);
+    color: #e74c3c;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .blockade-btn:hover {
+    background: rgba(231, 76, 60, 0.4);
+    transform: scale(1.1);
   }
 
   .tech-nodes {
@@ -398,6 +657,11 @@
     cursor: default;
     transition: all 0.25s;
     overflow: hidden;
+  }
+
+  .tech-node.blockaded {
+    border-color: rgba(231, 76, 60, 0.5);
+    background: rgba(231, 76, 60, 0.1);
   }
 
   .tech-node.available {
@@ -544,6 +808,37 @@
     animation: fadeInTooltip 0.15s ease-out;
   }
 
+  .synergy-tooltip {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    width: 220px;
+    background: #0d1421;
+    border: 1px solid #e67e22;
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.8),
+                0 0 0 1px rgba(230, 126, 34, 0.3);
+    z-index: 1000;
+    pointer-events: none;
+    animation: fadeInTooltip 0.15s ease-out;
+  }
+
+  .st-header {
+    color: #e67e22;
+    font-weight: bold;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+  }
+
+  .st-content pre {
+    margin: 0;
+    font-size: 0.72rem;
+    color: #bdc3c7;
+    white-space: pre-wrap;
+    font-family: inherit;
+    line-height: 1.5;
+  }
+
   @keyframes fadeInTooltip {
     from { opacity: 0; transform: translate(-50%, calc(-100% - 5px)); }
     to { opacity: 1; transform: translate(-50%, -100%); }
@@ -678,6 +973,123 @@
   @keyframes statusPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+
+  .modal-content {
+    background: #16213e;
+    border: 1px solid #34495e;
+    border-radius: 10px;
+    padding: 20px;
+    min-width: 320px;
+    max-width: 90%;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
+
+  .modal-content h3 {
+    margin: 0 0 12px 0;
+    color: #e74c3c;
+    font-size: 1.1rem;
+  }
+
+  .modal-desc {
+    color: #bdc3c7;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  .cost-hint {
+    color: #9b59b6;
+    font-weight: bold;
+  }
+
+  .target-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .target-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(52, 73, 94, 0.5);
+    border: 1px solid #34495e;
+    border-radius: 6px;
+    color: #ecf0f1;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .target-btn:hover:not(.disabled) {
+    background: rgba(231, 76, 60, 0.2);
+    border-color: #e74c3c;
+  }
+
+  .target-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .target-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .target-name {
+    flex: 1;
+    font-weight: bold;
+  }
+
+  .target-race {
+    color: #7f8c8d;
+    font-size: 0.75rem;
+  }
+
+  .blocked-tag {
+    color: #e74c3c;
+    font-size: 0.7rem;
+  }
+
+  .no-targets {
+    color: #7f8c8d;
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .close-btn {
+    width: 100%;
+    padding: 10px;
+    background: rgba(52, 73, 94, 0.5);
+    border: 1px solid #34495e;
+    border-radius: 6px;
+    color: #bdc3c7;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .close-btn:hover {
+    background: rgba(52, 73, 94, 0.8);
   }
 
   .tech-panel::-webkit-scrollbar {

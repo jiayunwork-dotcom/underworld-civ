@@ -293,10 +293,15 @@ func buildTechTree(player *game.PlayerState) []TechTreeNode {
 }
 
 type GetTechTreeResponse struct {
-	TechDefs        []game.Tech                  `json:"tech_defs"`
-	MyTechTree      []TechTreeNode               `json:"my_tech_tree"`
-	PlayerResearch  map[string]interface{}       `json:"player_research"`
-	OpponentTechs   map[string][]string          `json:"opponent_techs"`
+	TechDefs         []game.Tech                  `json:"tech_defs"`
+	MyTechTree       []TechTreeNode               `json:"my_tech_tree"`
+	PlayerResearch   map[string]interface{}       `json:"player_research"`
+	OpponentTechs    map[string][]string          `json:"opponent_techs"`
+	TechSynergies    map[string]*game.TechSynergy `json:"tech_synergies"`
+	KnowledgeReserve int                          `json:"knowledge_reserve"`
+	IncomingBlockades []game.TechBlockade         `json:"incoming_blockades"`
+	OutgoingBlockades []game.TechBlockade         `json:"outgoing_blockades"`
+	OpponentPlayers  []map[string]interface{}     `json:"opponent_players"`
 }
 
 func GetTechTree(c *fiber.Ctx) error {
@@ -312,6 +317,7 @@ func GetTechTree(c *fiber.Ctx) error {
 
 	opponentTechs := make(map[string][]string)
 	playerResearch := make(map[string]interface{})
+	opponentPlayers := make([]map[string]interface{}, 0)
 
 	for pid, p := range state.Players {
 		techList := make([]string, 0)
@@ -330,24 +336,99 @@ func GetTechTree(c *fiber.Ctx) error {
 			"researched_count":  len(techList),
 			"research_points":   p.ResearchPoints,
 		}
+
+		if pid != playerID && !p.Eliminated {
+			opponentPlayers = append(opponentPlayers, map[string]interface{}{
+				"player_id": pid,
+				"username":  p.Username,
+				"color":     p.Color,
+				"race":      p.Race,
+			})
+		}
 	}
 
 	var myTechTree []TechTreeNode
+	var synergies map[string]*game.TechSynergy
+	var knowledgeReserve int
+	var incomingBlockades []game.TechBlockade
+	var outgoingBlockades []game.TechBlockade
+
 	if player != nil {
 		myTechTree = buildTechTree(player)
+
+		if player.TechSynergies == nil {
+			player.TechSynergies = game.CalculateSynergies(player.Techs)
+		}
+
+		synergies = make(map[string]*game.TechSynergy)
+		for k, v := range player.TechSynergies {
+			synergies[string(k)] = v
+		}
+
+		knowledgeReserve = player.KnowledgeReserve
+		incomingBlockades = player.IncomingBlockades
+		outgoingBlockades = player.OutgoingBlockades
 	}
 
 	return c.JSON(GetTechTreeResponse{
-		TechDefs:       game.TechDefs,
-		MyTechTree:     myTechTree,
-		PlayerResearch: playerResearch,
-		OpponentTechs:  opponentTechs,
+		TechDefs:          game.TechDefs,
+		MyTechTree:        myTechTree,
+		PlayerResearch:    playerResearch,
+		OpponentTechs:     opponentTechs,
+		TechSynergies:     synergies,
+		KnowledgeReserve:  knowledgeReserve,
+		IncomingBlockades: incomingBlockades,
+		OutgoingBlockades: outgoingBlockades,
+		OpponentPlayers:   opponentPlayers,
 	})
 }
 
 type SetResearchRequest struct {
 	TechID   string `json:"tech_id"`
 	PlayerID string `json:"player_id"`
+}
+
+type BlockadeTechRequest struct {
+	PlayerID string `json:"player_id"`
+	TargetID string `json:"target_id"`
+	Category string `json:"category"`
+}
+
+func BlockadeTech(c *fiber.Ctx) error {
+	gameID := c.Params("id")
+
+	var req BlockadeTechRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	if req.PlayerID == "" {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "player id required"})
+	}
+
+	if req.TargetID == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "target id required"})
+	}
+
+	if req.Category == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "category required"})
+	}
+
+	state, ok := game.GetGameManager().GetGame(gameID)
+	if !ok {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "game not found"})
+	}
+
+	success, msg := state.BlockadeTech(req.PlayerID, req.TargetID, game.TechCategory(req.Category))
+	if !success {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": msg})
+	}
+
+	ws.GetHub().BroadcastToGame(gameID, "game_state", state)
+
+	return c.JSON(fiber.Map{
+		"message": "blockade successful",
+	})
 }
 
 func SetResearch(c *fiber.Ctx) error {

@@ -1,5 +1,7 @@
 package game
 
+import "fmt"
+
 type TechCategory string
 
 const (
@@ -70,6 +72,80 @@ var TechDefs = []Tech{
 type TechState struct {
 	Researched bool `json:"researched"`
 	Progress   int  `json:"progress"`
+}
+
+type TechSynergy struct {
+	Category      TechCategory `json:"category"`
+	Count         int          `json:"count"`
+	Triggered     int          `json:"triggered"`
+	AttackBonus   int          `json:"attack_bonus"`
+	ResearchBonus int          `json:"research_bonus"`
+	ResourceBonus float64      `json:"resource_bonus"`
+	HPBonus       float64      `json:"hp_bonus"`
+}
+
+func GetTechSynergyDescription(synergy *TechSynergy) string {
+	desc := ""
+	if synergy.AttackBonus > 0 {
+		desc += "⚔️ 全军攻击力+" + fmt.Sprintf("%d", synergy.AttackBonus)
+	}
+	if synergy.ResearchBonus > 0 {
+		if desc != "" {
+			desc += ", "
+		}
+		desc += "🔬 研究点数+" + fmt.Sprintf("%d", synergy.ResearchBonus) + "/回合"
+	}
+	if synergy.ResourceBonus > 0 {
+		if desc != "" {
+			desc += ", "
+		}
+		desc += "⛏️ 资源产出+" + fmt.Sprintf("%d", int(synergy.ResourceBonus*100)) + "%"
+	}
+	if synergy.HPBonus > 0 {
+		if desc != "" {
+			desc += ", "
+		}
+		desc += "❤️ 单位生命值+" + fmt.Sprintf("%d", int(synergy.HPBonus*100)) + "%"
+	}
+	return desc
+}
+
+func CalculateSynergies(researched map[string]bool) map[TechCategory]*TechSynergy {
+	synergies := make(map[TechCategory]*TechSynergy)
+	categories := []TechCategory{TechMilitary, TechEconomy, TechMining, TechSpecial}
+
+	for _, cat := range categories {
+		synergies[cat] = &TechSynergy{
+			Category: cat,
+			Count:    0,
+		}
+
+		techs := GetTechsByCategory(cat)
+		consecutive := 0
+
+		for _, tech := range techs {
+			if researched[tech.ID] {
+				consecutive++
+				if consecutive%3 == 0 {
+					synergies[cat].Triggered++
+					switch cat {
+					case TechMilitary:
+						synergies[cat].AttackBonus += 3
+					case TechEconomy:
+						synergies[cat].ResearchBonus += 1
+					case TechMining:
+						synergies[cat].ResourceBonus += 0.05
+					case TechSpecial:
+						synergies[cat].HPBonus += 0.02
+					}
+				}
+			}
+		}
+
+		synergies[cat].Count = consecutive
+	}
+
+	return synergies
 }
 
 func GetTechByID(id string) *Tech {

@@ -236,6 +236,20 @@ func (gm *GameManager) SubmitAction(gameID, playerID, action string, data map[st
 		return ok
 	}
 
+	if action == "blockade_tech" {
+		targetID, _ := data["target_id"].(string)
+		category, _ := data["category"].(string)
+		ok, _ := game.BlockadeTech(playerID, targetID, TechCategory(category))
+		return ok
+	}
+
+	if action == "dispatch_spy" {
+		unitID, _ := data["unit_id"].(string)
+		targetID, _ := data["target_id"].(string)
+		ok, _ := game.DispatchSpy(playerID, unitID, targetID)
+		return ok
+	}
+
 	game.SubmitAction(playerID, action, data)
 	return true
 }
