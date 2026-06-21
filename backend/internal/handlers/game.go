@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"underworld-civ/internal/game"
+	"underworld-civ/internal/ws"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -54,6 +55,7 @@ func CreateGame(c *fiber.Ctx) error {
 	}
 
 	state := game.GetGameManager().CreateGame(req.Name, req.MaxPlayers, playerID, username, race, req.Color)
+	ws.GetHub().CreateGameRoom(state.ID, state)
 
 	return c.JSON(fiber.Map{
 		"game_id":   state.ID,
@@ -140,6 +142,11 @@ func JoinGame(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "could not join game"})
 	}
 
+	hub := ws.GetHub()
+	if _, ok := hub.GetGameRoom(gameID); !ok {
+		hub.CreateGameRoom(gameID, state)
+	}
+
 	return c.JSON(fiber.Map{
 		"game_id":   gameID,
 		"player_id": playerID,
@@ -157,6 +164,12 @@ func StartGame(c *fiber.Ctx) error {
 	}
 
 	state, _ := game.GetGameManager().GetGame(gameID)
+
+	hub := ws.GetHub()
+	if _, ok := hub.GetGameRoom(gameID); !ok {
+		hub.CreateGameRoom(gameID, state)
+	}
+	hub.BroadcastToGame(gameID, "game_state", state)
 
 	return c.JSON(fiber.Map{
 		"message": "game started",
@@ -186,6 +199,9 @@ func SubmitAction(c *fiber.Ctx) error {
 	if !success {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "could not submit action"})
 	}
+
+	state, _ := game.GetGameManager().GetGame(gameID)
+	ws.GetHub().BroadcastToGame(gameID, "game_state", state)
 
 	return c.JSON(fiber.Map{"message": "action submitted"})
 }

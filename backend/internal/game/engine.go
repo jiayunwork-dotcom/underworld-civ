@@ -59,7 +59,7 @@ func (gs *GameState) AddPlayer(playerID, username string, race Race, color strin
 }
 
 func (gs *GameState) StartGame() {
-	if len(gs.Players) < 2 {
+	if len(gs.Players) < 1 {
 		return
 	}
 

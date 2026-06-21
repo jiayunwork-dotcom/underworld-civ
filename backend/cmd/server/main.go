@@ -90,24 +90,14 @@ func gameStateBroadcaster() {
 
 	for range ticker.C {
 		hub := ws.GetHub()
-		for _, room := range getGameRooms() {
-			if state, ok := game.GetGameManager().GetGame(room); ok {
-				hub.BroadcastToGame(room, "game_state", state)
+		games := game.GetGameManager().ListGames()
+		for _, g := range games {
+			if g.Status != "waiting" {
+				if _, ok := hub.GetGameRoom(g.ID); !ok {
+					hub.CreateGameRoom(g.ID, g)
+				}
+				hub.BroadcastToGame(g.ID, "game_state", g)
 			}
 		}
 	}
-}
-
-func getGameRooms() []string {
-	hub := ws.GetHub()
-	rooms := make([]string, 0)
-
-	games := game.GetGameManager().ListGames()
-	for _, g := range games {
-		if _, ok := hub.GetGameRoom(g.ID); ok {
-			rooms = append(rooms, g.ID)
-		}
-	}
-
-	return rooms
 }

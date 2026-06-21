@@ -26,8 +26,16 @@
 
   $: currentPlayer = game?.players?.[$playerID] || null;
 
-  onMount(() => {
+  onMount(async () => {
     if ($gameState?.id) {
+      try {
+        const res = await api.getGame($gameState.id, $playerID);
+        if (res?.game) {
+          gameState.set(res.game);
+        }
+      } catch (e) {
+        console.error('Failed to fetch initial game state:', e);
+      }
       ws = connectWS($gameState.id, $playerID, handleMessage);
     }
   });
@@ -54,6 +62,20 @@
   async function submitAction(action, data) {
     try {
       await api.submitAction($gameState.id, $playerID, action, data);
+      setTimeout(async () => {
+        try {
+          const res = await api.getGame($gameState.id, $playerID);
+          if (res?.game) {
+            const oldPlayer = game?.players?.[$playerID];
+            gameState.set(res.game);
+            if (oldPlayer && res.game?.players?.[$playerID]) {
+              trackResourceDelta(res.game.players[$playerID].resources, oldPlayer.resources);
+            }
+          }
+        } catch (e) {
+          console.error('Refresh after action failed:', e);
+        }
+      }, 100);
     } catch (e) {
       console.error('Action failed:', e);
     }
